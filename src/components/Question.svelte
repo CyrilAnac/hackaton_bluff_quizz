@@ -30,6 +30,7 @@
 	let voteOptions = $state<any[]>([]);
 	let selectedVoteId = $state<string | null>(null);
 	let isCorrect = $state<boolean | null>(null);
+	let isGeneratingCorrectAnswer = $state(false);
 
 	// Formater les joueurs depuis la room
 	const players = $derived(room.players?.map((p: any) => ({
@@ -202,7 +203,11 @@
 
 		if (totalResponses >= totalPlayers) {
 			// Tous les joueurs ont répondu, générer la bonne réponse si elle n'existe pas
-			await generateCorrectAnswerIfNeeded();
+			// Vérifier d'abord si une bonne réponse existe déjà dans les réponses chargées
+			const hasCorrectResponse = allResponses.some((r: any) => r.is_right === true && r.player_id === null);
+			if (!hasCorrectResponse && !isGeneratingCorrectAnswer) {
+				await generateCorrectAnswerIfNeeded();
+			}
 			phase = 'voting';
 		} else {
 			phase = 'waiting';
@@ -211,7 +216,15 @@
 
 	// Générer la bonne réponse avec l'IA si elle n'existe pas
 	async function generateCorrectAnswerIfNeeded() {
-		if (!question?.id || !room?.id) return;
+		if (!question?.id || !room?.id || isGeneratingCorrectAnswer) return;
+
+		// Vérifier d'abord côté client si une bonne réponse existe déjà
+		const hasCorrectResponse = allResponses.some((r: any) => r.is_right === true && r.player_id === null);
+		if (hasCorrectResponse) {
+			return;
+		}
+
+		isGeneratingCorrectAnswer = true;
 
 		try {
 			// Vérifier si une bonne réponse existe déjà
@@ -220,6 +233,7 @@
 				.select('id')
 				.eq('question_id', question.id)
 				.eq('is_right', true)
+				.eq('player_id', null)
 				.maybeSingle();
 
 			if (!existingCorrectResponse) {
@@ -243,6 +257,8 @@
 			}
 		} catch (err) {
 			console.error('Erreur lors de la génération de la bonne réponse:', err);
+		} finally {
+			isGeneratingCorrectAnswer = false;
 		}
 	}
 
