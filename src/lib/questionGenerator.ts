@@ -12,19 +12,19 @@ export interface Question {
  * @returns Un tableau de questions
  */
 export async function generateQuestions(count: number): Promise<Question[]> {
-	const prompt = `Génère ${count} questions difficiles et ambiguës pour un jeu de bluff/quiz. 
-Ces questions doivent être suffisamment difficiles pour créer du doute chez les joueurs, et doivent pouvoir être répondues avec une phrase (pas juste un mot ou un nombre).
+	const prompt = `Génère ${count} questions de culture générale insolites et méconnues pour un jeu de bluff.
+Les questions doivent être difficiles (peu de gens connaissent la réponse) mais doivent avoir une réponse factuelle unique et claire.
 
 Les questions doivent :
-- Être suffisamment difficiles pour que les joueurs ne soient pas sûrs de la réponse
-- Permettre des réponses formulées en phrase (pas juste "Paris" mais "La capitale de la France")
-- Créer de l'ambiguïté et du doute entre les joueurs
-- Être variées (histoire, géographie, sciences, culture générale, etc.)
+- Porter sur des faits surprenants ou des anecdotes historiques/scientifiques peu connues.
+- Avoir une réponse qui peut s'exprimer par une courte phrase ou un nom propre.
+- Ne PAS être ambiguës (il ne doit y avoir qu'une seule bonne réponse possible).
+- Être variées (histoire, géographie, sciences, nature, arts, etc.).
 
 Exemples de bonnes questions :
-- "Quel événement historique a marqué le début de la Renaissance en Europe ?"
-- "Quelle est la particularité géographique qui distingue l'Islande de la plupart des autres îles ?"
-- "Quel scientifique est crédité de la découverte de la structure en double hélice de l'ADN ?"
+- "Quel animal est connu pour avoir des empreintes digitales presque indiscernables de celles des humains ?"
+- "Quelle est la seule lettre de l'alphabet qui n'apparaît pas dans le tableau périodique des éléments ?"
+- "Quelle guerre a duré 38 minutes, ce qui en fait la plus courte de l'histoire ?"
 
 Format de réponse attendu (JSON valide) :
 {

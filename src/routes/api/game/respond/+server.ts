@@ -69,21 +69,21 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		// 4. Vérifier avec l'IA si la réponse est correcte
-		const prompt = `Tu es un juge pour un jeu de bluff/quiz. Tu dois évaluer si une réponse donnée par un joueur peut correspondre à une question, avec une certaine tolérance pour les variations de formulation et les approximations.
+		const prompt = `Tu es un juge impartial pour un jeu de questions-réponses.
+Ta tâche est de déterminer si la réponse proposée par un joueur est correcte pour la question donnée.
 
 Question : "${question.content}"
-Réponse du joueur : "${content.trim()}"
+Réponse proposée : "${content.trim()}"
 
-Évalue si la réponse du joueur peut être considérée comme correcte ou proche de la bonne réponse. Sois tolérant avec :
-- Les variations de formulation (par exemple "La capitale de la France" vs "Paris")
-- Les approximations et réponses partielles
-- Les réponses qui montrent une compréhension même si elles ne sont pas parfaitement précises
-- Les variations linguistiques et synonymes
+Instructions :
+1. Identifie d'abord la bonne réponse factuelle à la question en utilisant tes connaissances.
+2. Compare la réponse du joueur avec cette bonne réponse.
+3. Sois souple sur la forme (orthographe, synonymes, tournures de phrase) mais strict sur le fond (le fait doit être exact).
 
 Réponds UNIQUEMENT avec un JSON valide au format suivant :
 {
   "isValid": true ou false,
-  "confidence": un nombre entre 0 et 1 indiquant le niveau de confiance (1 = très sûr, 0.5 = douteux mais acceptable, 0 = incorrect),
+  "confidence": un nombre entre 0 et 1 (1 = certain, 0 = certain que c'est faux),
   "reason": "Une brève explication de ta décision"
 }
 

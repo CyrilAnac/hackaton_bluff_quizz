@@ -24,9 +24,12 @@
 	let votes = $state<any[]>([]);
 	let answer = $state('');
 	let fakeAnswer = $state('');
-	let phase = $state<'answering' | 'correct' | 'wrong' | 'waiting' | 'voting' | 'revealing'>('answering');
+	let phase = $state<'answering' | 'correct' | 'waiting' | 'voting' | 'revealing'>('answering');
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
+	let voteOptions = $state<any[]>([]);
+	let selectedVoteId = $state<string | null>(null);
+	let isCorrect = $state<boolean | null>(null);
 
 	// Formater les joueurs depuis la room
 	const players = $derived(room.players?.map((p: any) => ({
@@ -113,14 +116,26 @@
 			}
 
 			// Déterminer la phase initiale
-			if (playerResponse) {
-				if (playerResponse.is_right) {
-					phase = 'waiting';
-				} else {
+			if (question?.id) {
+				const savedStatus = typeof localStorage !== 'undefined' 
+					? localStorage.getItem(`bluff_quiz_status_${room.id}_${question.id}`) 
+					: null;
+				
+				if (savedStatus === 'correct') isCorrect = true;
+				else if (savedStatus === 'wrong') isCorrect = false;
+
+				if (playerResponse) {
+					// Le joueur a déjà soumis une réponse (bluff ou mauvaise réponse)
 					await checkVotingPhase();
+					if (phase !== 'voting') {
+						phase = 'waiting';
+					}
+				} else if (savedStatus === 'correct') {
+					// Le joueur a trouvé la bonne réponse mais n'a pas encore soumis son bluff
+					phase = 'correct';
+				} else {
+					phase = 'answering';
 				}
-			} else {
-				phase = 'answering';
 			}
 		} catch (err) {
 			console.error('Erreur lors du chargement:', err);
@@ -258,13 +273,19 @@
 
 			if (data.type === 'CORRECT') {
 				// Bonne réponse !
+				isCorrect = true;
+				if (typeof localStorage !== 'undefined') {
+					localStorage.setItem(`bluff_quiz_status_${room.id}_${question.id}`, 'correct');
+				}
 				phase = 'correct';
 			} else if (data.type === 'BLUFF') {
 				// Mauvaise réponse, bluff enregistré
-				phase = 'wrong';
-				setTimeout(async () => {
-					await checkVotingPhase();
-				}, 2000);
+				isCorrect = false;
+				if (typeof localStorage !== 'undefined') {
+					localStorage.setItem(`bluff_quiz_status_${room.id}_${question.id}`, 'wrong');
+				}
+				phase = 'waiting';
+				await checkVotingPhase();
 			}
 		} catch (err: any) {
 			console.error('Erreur lors de la vérification:', err);
@@ -410,32 +431,32 @@
 					{isLoading ? 'Envoi...' : 'Envoyer'}
 				</Button>
 			</div>
-		{:else if phase === 'wrong'}
-			<div class="flex flex-col items-center gap-4">
-				<div class="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-4xl shadow-lg">
-					✗
-				</div>
-				<h2 class="text-2xl font-bold text-white">Mauvaise réponse !</h2>
-				<p class="text-center text-white/80">
-					Votre réponse a été envoyée pour la phase de vote.
-				</p>
-				<p class="text-center text-sm text-white/60">
-					En attente des autres joueurs...
-				</p>
-			</div>
-
-			<div class="flex items-center gap-2">
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60"></div>
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.2s"></div>
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.4s"></div>
-			</div>
 		{:else if phase === 'waiting'}
 			<div class="flex flex-col items-center gap-4">
-				<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
-					✓
-				</div>
-				<h2 class="text-2xl font-bold text-white">Réponse envoyée !</h2>
-				<p class="text-center text-white/80">
+				{#if isCorrect === true}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
+						✓
+					</div>
+					<h2 class="text-2xl font-bold text-white">Bonne réponse !</h2>
+					<p class="text-center text-white/80">
+						Votre bluff a été envoyé.
+					</p>
+				{:else if isCorrect === false}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-4xl shadow-lg">
+						✗
+					</div>
+					<h2 class="text-2xl font-bold text-white">Mauvaise réponse !</h2>
+					<p class="text-center text-white/80">
+						Votre réponse a été envoyée pour la phase de vote.
+					</p>
+				{:else}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-blue-500 text-4xl shadow-lg">
+						⏳
+					</div>
+					<h2 class="text-2xl font-bold text-white">Réponse envoyée !</h2>
+				{/if}
+				
+				<p class="text-center text-white/80 mt-2">
 					En attente des autres joueurs...
 				</p>
 				<p class="text-center text-sm text-white/60">
