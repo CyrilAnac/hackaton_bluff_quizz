@@ -32,7 +32,7 @@
 
 			<div class="mt-4 w-full max-w-sm">
 				<a href="/lobby" class="block">
-					<Button variant="primary" size="lg">Créer la Room</Button>
+					<Button variant="primary" size="lg">Créer la Salle</Button>
 				</a>
 			</div>
 		</div>

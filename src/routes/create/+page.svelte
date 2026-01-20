@@ -9,7 +9,7 @@
 </script>
 
 <svelte:head>
-	<title>Créer une Room - Bluff Quiz</title>
+	<title>Créer une Salle - Bluff Quiz</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col items-center justify-center p-4">
@@ -19,7 +19,7 @@
 				&larr; Retour
 			</a>
 
-			<h1 class="text-2xl font-bold text-white sm:text-3xl">Créer une Room</h1>
+			<h1 class="text-2xl font-bold text-white sm:text-3xl">Créer une Salle</h1>
 
 			<div class="flex w-full flex-col items-center gap-2">
 				<p class="text-lg font-semibold text-white">Nombre de questions</p>
