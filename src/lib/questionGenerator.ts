@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient';
 
 export interface Question {
 	content: string;
+	accepted_answers: string[];
 }
 
 /**
@@ -15,22 +16,22 @@ export async function generateQuestions(count: number): Promise<Question[]> {
 	const prompt = `Génère ${count} questions de culture générale insolites et méconnues pour un jeu de bluff.
 Les questions doivent être difficiles (peu de gens connaissent la réponse) mais doivent avoir une réponse factuelle unique et claire.
 
+Pour chaque question, fournis une liste de "accepted_answers" qui contient :
+- La bonne réponse exacte.
+- Les variations d'orthographe acceptables (avec/sans accents).
+- Les synonymes ou formulations proches (ex: "Louis 14", "Louis XIV", "Le Roi Soleil").
+
 Les questions doivent :
 - Porter sur des faits surprenants ou des anecdotes historiques/scientifiques peu connues.
 - Avoir une réponse qui peut s'exprimer par une courte phrase ou un nom propre.
-- Ne PAS être ambiguës (il ne doit y avoir qu'une seule bonne réponse possible).
-- Être variées (histoire, géographie, sciences, nature, arts, etc.).
+- Ne PAS être ambiguës.
 
-Exemples de bonnes questions :
-- "Quel animal est connu pour avoir des empreintes digitales presque indiscernables de celles des humains ?"
-- "Quelle est la seule lettre de l'alphabet qui n'apparaît pas dans le tableau périodique des éléments ?"
-- "Quelle guerre a duré 38 minutes, ce qui en fait la plus courte de l'histoire ?"
-
-Format de réponse attendu (JSON valide) :
+Exemple de format attendu (JSON valide) :
 {
   "questions": [
     {
-      "content": "Question ici"
+      "content": "Quel animal est connu pour avoir des empreintes digitales presque indiscernables de celles des humains ?",
+      "accepted_answers": ["Le koala", "Koala", "Les koalas"]
     }
   ]
 }
@@ -53,7 +54,8 @@ Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.`;
 		}
 
 		return parsed.questions.map((q: any) => ({
-			content: q.content || q.question || ''
+			content: q.content || q.question || '',
+			accepted_answers: q.accepted_answers || []
 		}));
 	} catch (error) {
 		console.error('Erreur lors de la génération des questions:', error);
@@ -75,6 +77,7 @@ export async function insertQuestions(
 ): Promise<any[]> {
 	const questionsToInsert = questions.map((q) => ({
 		content: q.content,
+		accepted_answers: q.accepted_answers,
 		room_id: roomId,
 		round_number: roundNumber
 	}));
@@ -85,6 +88,11 @@ export async function insertQuestions(
 		.select();
 
 	if (error) {
+		console.error("Supabase insert error:", error);
+		if (error.message?.includes("accepted_answers")) {
+			console.error("IMPORTANT: Did you add the 'accepted_answers' column to the 'question' table in Supabase?");
+			console.error("Run SQL: alter table \"public\".\"question\" add column \"accepted_answers\" text[] default '{}';");
+		}
 		throw new Error(`Erreur lors de l'insertion des questions: ${error.message}`);
 	}
 

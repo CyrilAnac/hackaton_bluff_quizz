@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		// 2. Récupérer la question pour vérifier la réponse
 		const { data: question, error: questionError } = await supabase
 			.from('question')
-			.select('content')
+			.select('content, accepted_answers')
 			.eq('id', questionId)
 			.single();
 
@@ -68,43 +68,44 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// 4. Vérifier avec l'IA si la réponse est correcte
-		const prompt = `Tu es un juge impartial pour un jeu de questions-réponses.
-Ta tâche est de déterminer si la réponse proposée par un joueur est correcte pour la question donnée.
-
-Question : "${question.content}"
-Réponse proposée : "${content.trim()}"
-
-Instructions :
-1. Identifie d'abord la bonne réponse factuelle à la question en utilisant tes connaissances.
-2. Compare la réponse du joueur avec cette bonne réponse.
-3. Sois souple sur la forme (orthographe, synonymes, tournures de phrase) mais strict sur le fond (le fait doit être exact).
-
-Réponds UNIQUEMENT avec un JSON valide au format suivant :
-{
-  "isValid": true ou false,
-  "confidence": un nombre entre 0 et 1 (1 = certain, 0 = certain que c'est faux),
-  "reason": "Une brève explication de ta décision"
-}
-
-Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.`;
-
-		const aiResponse = await generateText(prompt);
+		// 4. Vérifier la réponse via la liste des réponses acceptées (sans IA)
 		
-		// Nettoyer la réponse pour extraire le JSON
-		const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-		if (!jsonMatch) {
-			throw new Error('Réponse de Gemini ne contient pas de JSON valide');
-		}
+		// Normalisation de la réponse utilisateur (minuscule, sans accents, trim)
+		const normalizeText = (text: string) => {
+			return text
+				.toLowerCase()
+				.normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Enlever les accents
+				.replace(/[^a-z0-9\s]/g, "") // Garder seulement alphanumérique et espaces
+				.trim();
+		};
 
-		const verification = JSON.parse(jsonMatch[0]);
+		const userResponseNormalized = normalizeText(content);
 		
-		if (typeof verification.isValid !== 'boolean') {
-			throw new Error('Format de réponse invalide : propriété "isValid" manquante ou invalide');
+		let isCorrect = false;
+		
+		if (question.accepted_answers && Array.isArray(question.accepted_answers)) {
+			// Vérifier si la réponse normalisée est dans la liste des réponses acceptées
+			isCorrect = question.accepted_answers.some((ans: string) => 
+				normalizeText(ans) === userResponseNormalized
+			);
+			
+			// Si pas de correspondance exacte, essayer une recherche floue simple (contient)
+			if (!isCorrect) {
+				// Si la réponse utilisateur est "Le Koala" et la réponse attendue est "Koala", on accepte
+				// Si la réponse attendue est "Louis XIV" et l'utilisateur met "Louis 14", normalizeText gère mal les chiffres romains -> gérer via les accepted_answers générés
+				isCorrect = question.accepted_answers.some((ans: string) => {
+					const ansNorm = normalizeText(ans);
+					// Si l'un contient l'autre et que la taille est suffisante (pour éviter les faux positifs courts)
+					return (ansNorm.length > 3 && userResponseNormalized.length > 3) && 
+						   (ansNorm.includes(userResponseNormalized) || userResponseNormalized.includes(ansNorm));
+				});
+			}
+		} else {
+			// Fallback si accepted_answers n'existe pas (anciennes questions) -> on utilise l'IA comme avant ou on refuse par défaut ?
+			// Pour la transition, on va considérer que c'est faux si pas de liste, ou logging d'erreur
+			console.warn(`Question ${questionId} n'a pas de accepted_answers. Validation impossible sans IA.`);
+			isCorrect = false;
 		}
-
-		// Seuil de tolérance : accepter si isValid est true OU si confidence >= 0.5
-		const isCorrect = verification.isValid || (verification.confidence >= 0.5);
 
 		if (isCorrect) {
 			// La réponse est correcte !

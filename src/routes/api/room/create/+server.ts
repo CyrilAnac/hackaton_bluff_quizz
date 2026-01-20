@@ -66,6 +66,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		// 4. Générer les questions (Utilisation de la vraie logique avec Gemini)
 		try {
 			// On génère une question par round
+			// Note : generateAndInsertQuestions peut échouer si Gemini ne répond pas un JSON valide ou timeout
 			for (let i = 1; i <= (rounds || 5); i++) {
 				await generateAndInsertQuestions(1, room.id, i);
 			}
@@ -75,7 +76,8 @@ export const POST: RequestHandler = async ({ request }) => {
 			const questionsToInsert = Array.from({ length: rounds || 5 }, (_, i) => ({
 				room_id: room.id,
 				round_number: i + 1,
-				content: `Question de secours pour le round ${i + 1}`
+				content: `Question de secours pour le round ${i + 1}`,
+				accepted_answers: ['Réponse de secours']
 			}));
 			await supabase.from('question').insert(questionsToInsert);
 		}
