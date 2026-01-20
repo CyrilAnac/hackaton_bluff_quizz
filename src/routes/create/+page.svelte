@@ -3,7 +3,6 @@
 	import Button from '../../components/Button.svelte';
 	import Card from '../../components/Card.svelte';
 	import NumberSelector from '../../components/NumberSelector.svelte';
-	import DifficultySelector from '../../components/DifficultySelector.svelte';
 
 	let difficulty = $state<'easy' | 'medium' | 'hard'>('medium');
 </script>

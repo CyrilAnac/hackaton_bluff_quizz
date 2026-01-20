@@ -33,7 +33,7 @@
 			const data = await res.json();
 			
 			if (data.success) {
-				goto(`/room/${data.room.code}`);
+				goto(`/lobby/${data.room.code}`);
 			} else {
 				throw new Error(data.error || "Erreur lors de la création de la salle");
 			}

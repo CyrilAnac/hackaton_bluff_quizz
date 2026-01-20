@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { supabase } from '$lib/supabaseClient';
+import { generateAndInsertQuestions } from '$lib/questionGenerator';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -62,14 +63,22 @@ export const POST: RequestHandler = async ({ request }) => {
 			console.error('Erreur liaison admin_id:', updateError);
 		}
 
-		// 4. Générer les questions (Optionnel mais pratique ici)
-		const questionsToInsert = Array.from({ length: rounds || 5 }, (_, i) => ({
-			room_id: room.id,
-			round_number: i + 1,
-			content: `Question pour le round ${i + 1}`
-		}));
-
-		await supabase.from('question').insert(questionsToInsert);
+		// 4. Générer les questions (Utilisation de la vraie logique avec Gemini)
+		try {
+			// On génère une question par round
+			for (let i = 1; i <= (rounds || 5); i++) {
+				await generateAndInsertQuestions(1, room.id, i);
+			}
+		} catch (qError: any) {
+			console.error("Erreur génération questions Gemini (non bloquant):", qError.message);
+			// Fallback sur des questions simples si Gemini échoue pour ne pas bloquer la création
+			const questionsToInsert = Array.from({ length: rounds || 5 }, (_, i) => ({
+				room_id: room.id,
+				round_number: i + 1,
+				content: `Question de secours pour le round ${i + 1}`
+			}));
+			await supabase.from('question').insert(questionsToInsert);
+		}
 
 		return json({
 			success: true,
