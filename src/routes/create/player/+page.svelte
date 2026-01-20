@@ -107,7 +107,7 @@
 					onclick={createRoomAndGenerateQuestions}
 					disabled={isLoading}
 				>
-					{isLoading ? 'Création en cours...' : 'Créer la Room'}
+					{isLoading ? 'Création en cours...' : 'Créer la salle'}
 				</Button>
 			</div>
 		</div>
