@@ -34,7 +34,11 @@
 			-->
 
 			<div class="mt-4 w-full max-w-sm">
-				<a href="/create/player" class="block">
+				<a href="/create/player" onclick={() => {
+					if (typeof window !== 'undefined') {
+						localStorage.setItem('questionCount', questionCount.toString());
+					}
+				}} class="block">
 					<Button variant="primary" size="lg">Suivant</Button>
 				</a>
 			</div>

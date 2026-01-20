@@ -1,11 +1,75 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import Button from '../../../components/Button.svelte';
 	import Card from '../../../components/Card.svelte';
 	import Input from '../../../components/Input.svelte';
 	import AvatarSelector from '../../../components/AvatarSelector.svelte';
+	import { createPlayer, createRoom, addPlayerToRoom } from '$lib/roomService';
 
 	let playerName = $state('');
 	let selectedAvatar = $state(0);
+	let isLoading = $state(false);
+	let error = $state<string | null>(null);
+
+	const avatars = ['😀', '😎', '🤠', '🥳', '😺', '🐶'];
+
+	async function createRoomAndGenerateQuestions() {
+		if (!playerName.trim()) {
+			error = 'Veuillez entrer votre nom';
+			return;
+		}
+
+		isLoading = true;
+		error = null;
+
+		try {
+			// Récupérer le nombre de questions depuis localStorage
+			const questionCount = parseInt(
+				typeof window !== 'undefined' ? localStorage.getItem('questionCount') || '5' : '5'
+			);
+
+			// Créer le joueur
+			const playerId = await createPlayer(playerName.trim(), avatars[selectedAvatar]);
+
+			// Créer la room (le nombre de rounds = nombre de questions pour simplifier)
+			const room = await createRoom(playerId, questionCount);
+
+			// Ajouter le joueur à la room
+			await addPlayerToRoom(room.id, playerId);
+
+			// Générer les questions pour le round 1 via l'API
+			const response = await fetch('/api/generate-questions', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					count: questionCount,
+					roomId: room.id,
+					roundNumber: 1
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.error || 'Erreur lors de la génération des questions');
+			}
+
+			// Stocker les informations de la room pour la page lobby
+			if (typeof window !== 'undefined') {
+				localStorage.setItem('roomId', room.id);
+				localStorage.setItem('roomCode', room.code);
+				localStorage.setItem('playerId', playerId);
+			}
+
+			// Rediriger vers le lobby
+			await goto(`/lobby?code=${room.code}`);
+		} catch (err) {
+			console.error('Erreur lors de la création de la room:', err);
+			error = err instanceof Error ? err.message : 'Une erreur est survenue';
+			isLoading = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -30,10 +94,21 @@
 				<AvatarSelector bind:selected={selectedAvatar} />
 			</div>
 
+			{#if error}
+				<div class="w-full max-w-sm rounded-lg bg-red-500/20 p-3 text-center text-sm text-red-300">
+					{error}
+				</div>
+			{/if}
+
 			<div class="mt-4 w-full max-w-sm">
-				<a href="/lobby" class="block">
-					<Button variant="primary" size="lg">Créer la Room</Button>
-				</a>
+				<Button
+					variant="primary"
+					size="lg"
+					onclick={createRoomAndGenerateQuestions}
+					disabled={isLoading}
+				>
+					{isLoading ? 'Création en cours...' : 'Créer la Room'}
+				</Button>
 			</div>
 		</div>
 	</Card>

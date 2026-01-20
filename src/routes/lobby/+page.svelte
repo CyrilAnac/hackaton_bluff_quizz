@@ -1,13 +1,19 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import Button from '../../components/Button.svelte';
 	import Card from '../../components/Card.svelte';
 	import QRCode from '../../components/QRCode.svelte';
 	import PlayerList from '../../components/PlayerList.svelte';
 
-	// Mock data - will be replaced with real data later
-	const roomCode = 'AZ342';
+	// Récupérer le code de la room depuis les query params ou localStorage
+	const roomCode = $derived(
+		$page.url.searchParams.get('code') ||
+			(typeof window !== 'undefined' ? localStorage.getItem('roomCode') : null) ||
+			'AZ342'
+	);
 	const joinUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/join?code=${roomCode}`;
 
+	// Mock data - will be replaced with real data later
 	const players = [
 		{ name: 'Alice', avatar: '😀', isHost: true },
 		{ name: 'Bob', avatar: '😎' },
