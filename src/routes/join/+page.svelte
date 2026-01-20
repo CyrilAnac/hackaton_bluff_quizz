@@ -6,7 +6,7 @@
 </script>
 
 <svelte:head>
-	<title>Rejoindre une Room - Bluff Quiz</title>
+	<title>Rejoindre une Salle - Bluff Quiz</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col items-center justify-center p-4">
@@ -16,11 +16,11 @@
 				&larr; Retour
 			</a>
 
-			<h1 class="text-2xl font-bold text-white sm:text-3xl">Rejoindre une Room</h1>
+			<h1 class="text-2xl font-bold text-white sm:text-3xl">Rejoindre une Salle</h1>
 
 			<div class="w-full max-w-sm">
 				<Input
-					label="Code de la room"
+					label="Code de la salle"
 					placeholder="Entrez le code (ex: AZ342)"
 					bind:value={gameSettings.roomCode}
 				/>

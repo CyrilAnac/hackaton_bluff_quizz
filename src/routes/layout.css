@@ -11,8 +11,8 @@
 	--color-warm-medium: #6a040f;
 	--color-warm-light: #9d0208;
 
-	--font-heading: 'Fredoka', system-ui, sans-serif;
-	--font-body: 'Nunito', system-ui, sans-serif;
+	--font-heading: 'Montserrat', system-ui, sans-serif;
+	--font-body: 'Montserrat', system-ui, sans-serif;
 }
 
 @layer base {

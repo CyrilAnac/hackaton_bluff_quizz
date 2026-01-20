@@ -5,63 +5,69 @@
 	import Card from '../../../components/Card.svelte';
 	import Input from '../../../components/Input.svelte';
 	import AvatarSelector from '../../../components/AvatarSelector.svelte';
+	import { createPlayer, createRoom, addPlayerToRoom } from '$lib/roomService';
 
+	let playerName = $state('');
+	let selectedAvatar = $state(0);
 	let isLoading = $state(false);
+	let error = $state<string | null>(null);
 
-	async function createRoom() {
-		if (!gameSettings.playerName || isLoading) return;
+	const avatars = ['😀', '😎', '🤠', '🥳', '😺', '🐶'];
+
+	async function createRoomAndGenerateQuestions() {
+		if (!playerName.trim()) {
+			error = 'Veuillez entrer votre nom';
+			return;
+		}
+
 		isLoading = true;
+		error = null;
 
 		try {
-			// 1. Créer le joueur (Admin) d'abord
-			const playerRes = await fetch('/api/player/create', {
+			// Récupérer le nombre de questions depuis localStorage
+			const questionCount = parseInt(
+				typeof window !== 'undefined' ? localStorage.getItem('questionCount') || '5' : '5'
+			);
+
+			// Créer le joueur
+			const playerId = await createPlayer(playerName.trim(), avatars[selectedAvatar]);
+
+			// Créer la room (le nombre de rounds = nombre de questions pour simplifier)
+			const room = await createRoom(playerId, questionCount);
+
+			// Ajouter le joueur à la room
+			await addPlayerToRoom(room.id, playerId);
+
+			// Générer les questions pour le round 1 via l'API
+			const response = await fetch('/api/generate-questions', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ 
-					playerName: gameSettings.playerName, 
-					iconId: gameSettings.iconId
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					count: questionCount,
+					roomId: room.id,
+					roundNumber: 1
 				})
 			});
 
-			const playerData = await playerRes.json();
-			if (!playerData.success) {
-				alert(playerData.error || "Erreur lors de la création du profil");
-				isLoading = false;
-				return;
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.error || 'Erreur lors de la génération des questions');
 			}
 
-			// 2. Créer la salle avec l'ID du joueur comme adminId
-			const roomRes = await fetch('/api/room/create', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ 
-					adminId: playerData.player.id,
-					rounds: gameSettings.rounds
-				})
-			});
-            // 3. Créer les question de la room en fonction du nombre de rounds
-			const questionsRes = await fetch('/api/question/create', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ 
-					roomId: playerData.player.id,
-					rounds: gameSettings.rounds
-				})
-			});
-			
-			console.log(roomRes);
-			const roomData = await roomRes.json();
-
-
-			if (roomData.success) {
-				goto(`/room/${roomData.room.code}`);
-			} else {
-				alert(roomData.error || "Erreur lors de la création de la salle");
+			// Stocker les informations de la room pour la page lobby
+			if (typeof window !== 'undefined') {
+				localStorage.setItem('roomId', room.id);
+				localStorage.setItem('roomCode', room.code);
+				localStorage.setItem('playerId', playerId);
 			}
+
+			// Rediriger vers le lobby
+			await goto(`/lobby?code=${room.code}`);
 		} catch (err) {
-			console.error(err);
-			alert("Erreur réseau lors de la création");
-		} finally {
+			console.error('Erreur lors de la création de la room:', err);
+			error = err instanceof Error ? err.message : 'Une erreur est survenue';
 			isLoading = false;
 		}
 	}
@@ -89,14 +95,20 @@
 				<AvatarSelector bind:selected={gameSettings.iconId} />
 			</div>
 
+			{#if error}
+				<div class="w-full max-w-sm rounded-lg bg-red-500/20 p-3 text-center text-sm text-red-300">
+					{error}
+				</div>
+			{/if}
+
 			<div class="mt-4 w-full max-w-sm">
-				<Button 
-					variant="primary" 
-					size="lg" 
-					onclick={createRoom}
-					disabled={!gameSettings.playerName || isLoading}
+				<Button
+					variant="primary"
+					size="lg"
+					onclick={createRoomAndGenerateQuestions}
+					disabled={isLoading}
 				>
-					{isLoading ? 'Création...' : 'Créer la Room'}
+					{isLoading ? 'Création en cours...' : 'Créer la salle'}
 				</Button>
 			</div>
 		</div>
