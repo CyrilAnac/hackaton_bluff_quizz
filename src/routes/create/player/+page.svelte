@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { gameSettings } from '$lib/gameSettings.svelte';
+	import { AVATARS } from '$lib/constants';
 	import Button from '../../../components/Button.svelte';
 	import Card from '../../../components/Card.svelte';
 	import Input from '../../../components/Input.svelte';
@@ -25,7 +26,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ 
 					playerName: gameSettings.playerName, 
-					iconId: gameSettings.iconId,
+					iconId: AVATARS[gameSettings.iconId] || AVATARS[0],
 					rounds: gameSettings.rounds
 				})
 			});
