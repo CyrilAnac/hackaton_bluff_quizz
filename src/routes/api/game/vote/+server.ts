@@ -26,7 +26,45 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json({ error: 'Tu ne peux pas voter pour ton propre bluff !' }, { status: 400 });
 		}
 
-		// 3. Vérifier si le joueur a déjà voté pour cette question
+		// 2.5. Vérifier si le joueur a trouvé la bonne réponse (il ne peut pas voter)
+		// Méthode 1 : Vérifier via la table correct_answer_finders
+		try {
+			const { data: finderData } = await supabase
+				.from('correct_answer_finders')
+				.select('player_id')
+				.eq('question_id', responseData.question_id)
+				.eq('player_id', playerId)
+				.maybeSingle();
+			
+			if (finderData) {
+				return json({ error: 'Tu as trouvé la bonne réponse, tu ne peux pas voter !' }, { status: 400 });
+			}
+		} catch (err) {
+			// Si la table n'existe pas, utiliser la méthode alternative
+			// Méthode 2 : Vérifier si le joueur a une réponse qui correspond à la bonne réponse
+			const { data: correctResponse } = await supabase
+				.from('responses')
+				.select('content')
+				.eq('question_id', responseData.question_id)
+				.eq('is_right', true)
+				.maybeSingle();
+			
+			if (correctResponse) {
+				const { data: playerResponse } = await supabase
+					.from('responses')
+					.select('content')
+					.eq('question_id', responseData.question_id)
+					.eq('player_id', playerId)
+					.maybeSingle();
+				
+				if (playerResponse && 
+					playerResponse.content.toLowerCase().trim() === correctResponse.content.toLowerCase().trim()) {
+					return json({ error: 'Tu as trouvé la bonne réponse, tu ne peux pas voter !' }, { status: 400 });
+				}
+			}
+		}
+
+		// 4. Vérifier si le joueur a déjà voté pour cette question
 		// Récupérer tous les votes du joueur
 		const { data: playerVotes, error: voteCheckError } = await supabase
 			.from('votes')
@@ -56,7 +94,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		// 4. Insérer le vote
+		// 5. Insérer le vote
 		const { data: newVote, error: insertError } = await supabase
 			.from('votes')
 			.insert([{

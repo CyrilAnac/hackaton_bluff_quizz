@@ -24,6 +24,8 @@
 	let scores = $state<Record<string, number>>({});
 	let scoreDetails = $state<Record<string, { foundCorrect: boolean; votesReceived: number; votedCorrect: boolean }>>({});
 	let correctResponseId = $state<string | null>(null);
+	let hasFoundCorrectAnswer = $state(false);
+	let playersWhoCanVoteCount = $state<number>(0);
 
 	// Formater les joueurs depuis la room
 	const players = $derived(room.players?.map((p: any) => ({
@@ -61,6 +63,34 @@
 						player: player || null
 					};
 				});
+
+				// Vérifier si le joueur a trouvé la bonne réponse
+				hasFoundCorrectAnswer = false;
+				if (playerId) {
+					// Méthode 1 : Vérifier via la table correct_answer_finders
+					try {
+						const { data: finderData } = await supabase
+							.from('correct_answer_finders')
+							.select('player_id')
+							.eq('question_id', question.id)
+							.eq('player_id', playerId)
+							.maybeSingle();
+						
+						if (finderData) {
+							hasFoundCorrectAnswer = true;
+						}
+					} catch (err) {
+						// Si la table n'existe pas, utiliser la méthode alternative
+						// Méthode 2 : Vérifier si le joueur a une réponse qui correspond à la bonne réponse
+						const correctResponse = responses.find((r: any) => r.is_right === true);
+						if (correctResponse) {
+							const playerResponse = responses.find((r: any) => r.player_id === playerId);
+							if (playerResponse && playerResponse.content.toLowerCase().trim() === correctResponse.content.toLowerCase().trim()) {
+								hasFoundCorrectAnswer = true;
+							}
+						}
+					}
+				}
 
 				// Préparer les options de vote (exclure la réponse du joueur actuel)
 				voteOptions = allResponses
@@ -109,11 +139,25 @@
 				// Mélanger les options pour ne pas révéler la bonne réponse
 				voteOptions = shuffleArray(voteOptions);
 
-				// Vérifier si tous les joueurs ont voté
-				const totalPlayers = room.players?.length || 0;
+				// Vérifier si tous les joueurs éligibles ont voté
+				// Les joueurs qui ont trouvé la bonne réponse ne votent pas
+				playersWhoCanVoteCount = room.players?.length || 0;
+				try {
+					const { data: allFinders } = await supabase
+						.from('correct_answer_finders')
+						.select('player_id')
+						.eq('question_id', question.id);
+					
+					if (allFinders) {
+						playersWhoCanVoteCount -= allFinders.length;
+					}
+				} catch (err) {
+					// Si la table n'existe pas, on compte tous les joueurs
+				}
+				
 				const uniqueVoters = new Set(votes.map((v: any) => v.player_id));
-				if (uniqueVoters.size >= totalPlayers && totalPlayers > 0 && phase === 'voting') {
-					// Tous les joueurs ont voté, calculer les scores
+				if (uniqueVoters.size >= playersWhoCanVoteCount && playersWhoCanVoteCount > 0 && phase === 'voting') {
+					// Tous les joueurs éligibles ont voté, calculer les scores
 					await calculateScores();
 				}
 			}
@@ -251,30 +295,51 @@
 		{/if}
 
 		{#if phase === 'voting'}
-			<h2 class="text-xl font-bold text-white mb-4">Trouvez la bonne réponse !</h2>
-			
-			<div class="grid grid-cols-1 gap-3 w-full sm:grid-cols-2">
-				{#each voteOptions as option}
-					{@const isMyBluff = option.authorId === playerId}
-					<button
-						class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all
-						{selectedVoteId === option.id 
-							? 'bg-white text-primary ring-4 ring-white/50 scale-[1.02]' 
-							: 'bg-white/20 text-white hover:bg-white/30'}
-						{isMyBluff ? 'opacity-50 cursor-not-allowed border-2 border-dashed border-white/50' : ''}"
-						onclick={() => handleVote(option.id)}
-						disabled={!!selectedVoteId || isMyBluff || isLoading}
-					>
-						<p class="font-medium text-lg">{option.text}</p>
-						{#if isMyBluff}
-							<span class="text-xs uppercase mt-2 font-bold tracking-wider">(Votre bluff)</span>
-						{/if}
-					</button>
-				{/each}
-			</div>
-			
-			{#if selectedVoteId}
-				<p class="text-white/80 animate-pulse mt-4">En attente des autres joueurs...</p>
+			{#if hasFoundCorrectAnswer}
+				<div class="flex flex-col items-center gap-4">
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
+						✓
+					</div>
+					<h2 class="text-2xl font-bold text-white">Bonne réponse trouvée !</h2>
+					<p class="text-center text-white/80">
+						Vous avez trouvé la bonne réponse, vous ne pouvez pas participer à la phase de vote.
+					</p>
+					<p class="text-center text-sm text-white/60">
+						En attente des autres joueurs...
+					</p>
+				</div>
+
+				<div class="flex items-center gap-2">
+					<div class="h-3 w-3 animate-pulse rounded-full bg-white/60"></div>
+					<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.2s"></div>
+					<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.4s"></div>
+				</div>
+			{:else}
+				<h2 class="text-xl font-bold text-white mb-4">Trouvez la bonne réponse !</h2>
+				
+				<div class="grid grid-cols-1 gap-3 w-full sm:grid-cols-2">
+					{#each voteOptions as option}
+						{@const isMyBluff = option.authorId === playerId}
+						<button
+							class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all
+							{selectedVoteId === option.id 
+								? 'bg-white text-primary ring-4 ring-white/50 scale-[1.02]' 
+								: 'bg-white/20 text-white hover:bg-white/30'}
+							{isMyBluff ? 'opacity-50 cursor-not-allowed border-2 border-dashed border-white/50' : ''}"
+							onclick={() => handleVote(option.id)}
+							disabled={!!selectedVoteId || isMyBluff || isLoading}
+						>
+							<p class="font-medium text-lg">{option.text}</p>
+							{#if isMyBluff}
+								<span class="text-xs uppercase mt-2 font-bold tracking-wider">(Votre bluff)</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+				
+				{#if selectedVoteId}
+					<p class="text-white/80 animate-pulse mt-4">En attente des autres joueurs...</p>
+				{/if}
 			{/if}
 
 		{:else if phase === 'waiting'}
@@ -287,7 +352,7 @@
 					En attente des autres joueurs...
 				</p>
 				<p class="text-center text-sm text-white/60">
-					{votes.length} / {room.players?.length || 0} joueurs ont voté
+					{votes.length} / {playersWhoCanVoteCount} joueur{playersWhoCanVoteCount > 1 ? 's' : ''} {playersWhoCanVoteCount > 1 ? 'ont' : 'a'} voté
 				</p>
 			</div>
 
