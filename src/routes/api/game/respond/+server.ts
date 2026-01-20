@@ -35,29 +35,55 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		// 3. Vérifier si une bonne réponse existe déjà pour cette question
-		const { data: existingCorrectResponse } = await supabase
+		// Utiliser .limit(1) pour éviter les problèmes si plusieurs existent
+		const { data: existingCorrectResponses, count } = await supabase
 			.from('responses')
-			.select('content')
+			.select('id', { count: 'exact' })
 			.eq('question_id', questionId)
 			.eq('is_right', true)
-			.maybeSingle();
+			.eq('player_id', null)
+			.limit(1);
+		
+		let existingCorrectResponse = existingCorrectResponses && existingCorrectResponses.length > 0 
+			? existingCorrectResponses[0] 
+			: null;
+		
+		// Si plusieurs bonnes réponses existent, on en garde une seule et on supprime les autres
+		if (count && count > 1) {
+			console.warn(`Plusieurs bonnes réponses trouvées pour la question ${questionId}, nettoyage en cours...`);
+			const { data: allCorrectResponses } = await supabase
+				.from('responses')
+				.select('id')
+				.eq('question_id', questionId)
+				.eq('is_right', true)
+				.eq('player_id', null);
+			
+			if (allCorrectResponses && allCorrectResponses.length > 1) {
+				// Garder la première et supprimer les autres
+				const idsToDelete = allCorrectResponses.slice(1).map((r: any) => r.id);
+				await supabase
+					.from('responses')
+					.delete()
+					.in('id', idsToDelete);
+			}
+		}
 
 		// 4. Vérifier avec l'IA si la réponse est correcte
-		const prompt = `Tu es un juge pour un jeu de bluff/quiz. Tu dois évaluer si une réponse donnée par un joueur peut correspondre à une question, avec une certaine tolérance pour les variations de formulation et les approximations.
+		const prompt = `Tu es un juge impartial pour un jeu de questions-réponses.
+Ta tâche est de déterminer si la réponse proposée par un joueur est correcte pour la question donnée.
 
 Question : "${question.content}"
-Réponse du joueur : "${content.trim()}"
+Réponse proposée : "${content.trim()}"
 
-Évalue si la réponse du joueur peut être considérée comme correcte ou proche de la bonne réponse. Sois tolérant avec :
-- Les variations de formulation (par exemple "La capitale de la France" vs "Paris")
-- Les approximations et réponses partielles
-- Les réponses qui montrent une compréhension même si elles ne sont pas parfaitement précises
-- Les variations linguistiques et synonymes
+Instructions :
+1. Identifie d'abord la bonne réponse factuelle à la question en utilisant tes connaissances.
+2. Compare la réponse du joueur avec cette bonne réponse.
+3. Sois souple sur la forme (orthographe, synonymes, tournures de phrase) mais strict sur le fond (le fait doit être exact).
 
 Réponds UNIQUEMENT avec un JSON valide au format suivant :
 {
   "isValid": true ou false,
-  "confidence": un nombre entre 0 et 1 indiquant le niveau de confiance (1 = très sûr, 0.5 = douteux mais acceptable, 0 = incorrect),
+  "confidence": un nombre entre 0 et 1 (1 = certain, 0 = certain que c'est faux),
   "reason": "Une brève explication de ta décision"
 }
 
@@ -84,37 +110,97 @@ Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.`;
 			// La réponse est correcte !
 			// Vérifier si une bonne réponse existe déjà
 			if (!existingCorrectResponse) {
-				// Créer la bonne réponse si elle n'existe pas encore
-				const { data: correctResponse, error: insertCorrectError } = await supabase
+				// Vérifier une dernière fois avant d'insérer (pour éviter les race conditions)
+				const { data: finalCheck } = await supabase
 					.from('responses')
+					.select('id')
+					.eq('question_id', questionId)
+					.eq('is_right', true)
+					.eq('player_id', null)
+					.limit(1);
+
+				if (finalCheck && finalCheck.length > 0) {
+					// Une bonne réponse a été créée entre-temps, on continue comme si elle existait déjà
+					existingCorrectResponse = finalCheck[0];
+				} else {
+					// Créer la bonne réponse si elle n'existe pas encore
+					const { data: correctResponse, error: insertCorrectError } = await supabase
+						.from('responses')
+						.insert([{
+							question_id: questionId,
+							content: content.trim(),
+							player_id: null, // La bonne réponse n'a pas de joueur associé
+							is_right: true
+						}])
+						.select()
+						.single();
+
+					if (insertCorrectError) {
+						console.error('Erreur insertion bonne réponse:', insertCorrectError);
+						// Si l'erreur est due à un doublon créé entre-temps, vérifier à nouveau
+						if (insertCorrectError.code === '23505' || insertCorrectError.message?.includes('duplicate')) {
+							const { data: existing } = await supabase
+								.from('responses')
+								.select('id')
+								.eq('question_id', questionId)
+								.eq('is_right', true)
+								.eq('player_id', null)
+								.limit(1)
+								.single();
+							
+							if (existing) {
+								existingCorrectResponse = existing;
+							} else {
+								return json({ error: 'Erreur lors de l\'enregistrement de la bonne réponse' }, { status: 500 });
+							}
+						} else {
+							return json({ error: 'Erreur lors de l\'enregistrement de la bonne réponse' }, { status: 500 });
+						}
+					} else {
+						// Stocker qui a trouvé la bonne réponse dans une table dédiée (si elle existe)
+						try {
+							await supabase
+								.from('correct_answer_finders')
+								.insert([{
+									question_id: questionId,
+									player_id: playerId,
+									found_at: new Date().toISOString()
+								}]);
+						} catch (err) {
+							// La table n'existe peut-être pas, on continue
+							console.log('Table correct_answer_finders non disponible, utilisation de la méthode alternative');
+						}
+
+						return json({ 
+							success: true, 
+							type: 'CORRECT',
+							message: 'Bonne réponse ! Vous pouvez maintenant créer une fausse réponse pour piéger les autres.',
+							response: correctResponse
+						});
+					}
+				}
+			}
+			
+			// Si on arrive ici, une bonne réponse existe déjà (soit elle existait, soit elle a été créée entre-temps)
+			// Stocker qui a trouvé la bonne réponse dans une table dédiée (si elle existe)
+			try {
+				await supabase
+					.from('correct_answer_finders')
 					.insert([{
 						question_id: questionId,
-						content: content.trim(),
-						player_id: null, // La bonne réponse n'a pas de joueur associé
-						is_right: true
-					}])
-					.select()
-					.single();
-
-				if (insertCorrectError) {
-					console.error('Erreur insertion bonne réponse:', insertCorrectError);
-					return json({ error: 'Erreur lors de l\'enregistrement de la bonne réponse' }, { status: 500 });
-				}
-
-				return json({ 
-					success: true, 
-					type: 'CORRECT',
-					message: 'Bonne réponse ! Vous pouvez maintenant créer une fausse réponse pour piéger les autres.',
-					response: correctResponse
-				});
-			} else {
-				// La bonne réponse existe déjà, le joueur a trouvé la bonne réponse
-				return json({ 
-					success: true, 
-					type: 'CORRECT',
-					message: 'Bonne réponse ! Vous pouvez maintenant créer une fausse réponse pour piéger les autres.'
-				});
+						player_id: playerId,
+						found_at: new Date().toISOString()
+					}]);
+			} catch (err) {
+				// La table n'existe peut-être pas, on continue
+				console.log('Table correct_answer_finders non disponible, utilisation de la méthode alternative');
 			}
+
+			return json({ 
+				success: true, 
+				type: 'CORRECT',
+				message: 'Bonne réponse ! Vous pouvez maintenant créer une fausse réponse pour piéger les autres.'
+			});
 		} else {
 			// C'est un bluff, on l'ajoute à la table responses pour que les autres puissent voter dessus
 			const { data: newResponse, error: insertError } = await supabase

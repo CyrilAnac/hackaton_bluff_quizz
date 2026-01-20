@@ -6,6 +6,7 @@
 	import Card from './Card.svelte';
 	import Input from './Input.svelte';
 	import Timer from './Timer.svelte';
+	import Vote from './Vote.svelte';
 
 	interface Props {
 		room: any;
@@ -23,11 +24,12 @@
 	let votes = $state<any[]>([]);
 	let answer = $state('');
 	let fakeAnswer = $state('');
-	let phase = $state<'answering' | 'correct' | 'wrong' | 'waiting' | 'voting' | 'revealing'>('answering');
+	let phase = $state<'answering' | 'correct' | 'waiting' | 'voting' | 'revealing'>('answering');
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 	let voteOptions = $state<any[]>([]);
 	let selectedVoteId = $state<string | null>(null);
+	let isCorrect = $state<boolean | null>(null);
 
 	// Formater les joueurs depuis la room
 	const players = $derived(room.players?.map((p: any) => ({
@@ -114,14 +116,26 @@
 			}
 
 			// Déterminer la phase initiale
-			if (playerResponse) {
-				if (playerResponse.is_right) {
-					phase = 'waiting';
-				} else {
+			if (question?.id) {
+				const savedStatus = typeof localStorage !== 'undefined' 
+					? localStorage.getItem(`bluff_quiz_status_${room.id}_${question.id}`) 
+					: null;
+				
+				if (savedStatus === 'correct') isCorrect = true;
+				else if (savedStatus === 'wrong') isCorrect = false;
+
+				if (playerResponse) {
+					// Le joueur a déjà soumis une réponse (bluff ou mauvaise réponse)
 					await checkVotingPhase();
+					if (phase !== 'voting') {
+						phase = 'waiting';
+					}
+				} else if (savedStatus === 'correct') {
+					// Le joueur a trouvé la bonne réponse mais n'a pas encore soumis son bluff
+					phase = 'correct';
+				} else {
+					phase = 'answering';
 				}
-			} else {
-				phase = 'answering';
 			}
 		} catch (err) {
 			console.error('Erreur lors du chargement:', err);
@@ -187,53 +201,51 @@
 		const totalResponses = allResponses.length;
 
 		if (totalResponses >= totalPlayers) {
-			await loadVoteOptions();
+			// Tous les joueurs ont répondu, générer la bonne réponse si elle n'existe pas
+			await generateCorrectAnswerIfNeeded();
 			phase = 'voting';
 		} else {
 			phase = 'waiting';
 		}
 	}
 
-		// Charger les options de vote
-	async function loadVoteOptions() {
-		if (!question?.id) return;
+	// Générer la bonne réponse avec l'IA si elle n'existe pas
+	async function generateCorrectAnswerIfNeeded() {
+		if (!question?.id || !room?.id) return;
 
-		if (allResponses && allResponses.length > 0) {
-			voteOptions = allResponses.map((r: any) => ({
-				id: r.id,
-				text: r.content,
-				authorId: r.player_id,
-				isCorrect: r.is_right,
-				votes: [] as string[]
-			}));
+		try {
+			// Vérifier si une bonne réponse existe déjà
+			const { data: existingCorrectResponse } = await supabase
+				.from('responses')
+				.select('id')
+				.eq('question_id', question.id)
+				.eq('is_right', true)
+				.maybeSingle();
 
-			const responseIds = voteOptions.map((v: any) => v.id);
-			const { data: existingVotes } = await supabase
-				.from('votes')
-				.select('player_id, response_id')
-				.in('response_id', responseIds);
-
-			if (existingVotes) {
-				existingVotes.forEach((vote: any) => {
-					const option = voteOptions.find((v: any) => v.id === vote.response_id);
-					if (option) {
-						option.votes.push(vote.player_id);
-					}
+			if (!existingCorrectResponse) {
+				// Générer la bonne réponse avec l'IA
+				const res = await fetch('/api/game/generate-correct-answer', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						questionId: question.id,
+						roomId: room.id
+					})
 				});
+
+				const data = await res.json();
+				if (!data.success && !data.alreadyExists) {
+					console.error('Erreur génération bonne réponse:', data.error);
+				}
+
+				// Recharger les données pour avoir la nouvelle réponse
+				await loadQuestionData();
 			}
-
-			voteOptions = shuffleArray(voteOptions);
+		} catch (err) {
+			console.error('Erreur lors de la génération de la bonne réponse:', err);
 		}
 	}
 
-	function shuffleArray<T>(array: T[]): T[] {
-		const newArray = [...array];
-		for (let i = newArray.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
-			[newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-		}
-		return newArray;
-	}
 
 	async function checkAnswer() {
 		if (!answer.trim() || !question?.id || !playerId) return;
@@ -261,13 +273,19 @@
 
 			if (data.type === 'CORRECT') {
 				// Bonne réponse !
+				isCorrect = true;
+				if (typeof localStorage !== 'undefined') {
+					localStorage.setItem(`bluff_quiz_status_${room.id}_${question.id}`, 'correct');
+				}
 				phase = 'correct';
 			} else if (data.type === 'BLUFF') {
 				// Mauvaise réponse, bluff enregistré
-				phase = 'wrong';
-				setTimeout(async () => {
-					await checkVotingPhase();
-				}, 2000);
+				isCorrect = false;
+				if (typeof localStorage !== 'undefined') {
+					localStorage.setItem(`bluff_quiz_status_${room.id}_${question.id}`, 'wrong');
+				}
+				phase = 'waiting';
+				await checkVotingPhase();
 			}
 		} catch (err: any) {
 			console.error('Erreur lors de la vérification:', err);
@@ -326,51 +344,6 @@
 		}
 	}
 
-	async function handleVote(responseId: string) {
-		if (selectedVoteId || !playerId) return;
-
-		const option = voteOptions.find((v: any) => v.id === responseId);
-		if (option?.authorId === playerId) {
-			alert("Vous ne pouvez pas voter pour votre propre réponse !");
-			return;
-		}
-
-		isLoading = true;
-		error = null;
-
-		try {
-			const res = await fetch('/api/game/vote', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					playerId,
-					responseId
-				})
-			});
-
-			const data = await res.json();
-
-			if (!data.success) {
-				throw new Error(data.error || 'Erreur lors du vote');
-			}
-
-			selectedVoteId = responseId;
-			
-			setTimeout(async () => {
-				await revealResults();
-			}, 2000);
-		} catch (err: any) {
-			console.error('Erreur lors du vote:', err);
-			error = err.message || 'Erreur lors du vote';
-		} finally {
-			isLoading = false;
-		}
-	}
-
-	async function revealResults() {
-		await loadVoteOptions();
-		phase = 'revealing';
-	}
 
 	function handleTimeUp() {
 		if (phase === 'answering' && answer.trim()) {
@@ -458,32 +431,32 @@
 					{isLoading ? 'Envoi...' : 'Envoyer'}
 				</Button>
 			</div>
-		{:else if phase === 'wrong'}
-			<div class="flex flex-col items-center gap-4">
-				<div class="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-4xl shadow-lg">
-					✗
-				</div>
-				<h2 class="text-2xl font-bold text-white">Mauvaise réponse !</h2>
-				<p class="text-center text-white/80">
-					Votre réponse a été envoyée pour la phase de vote.
-				</p>
-				<p class="text-center text-sm text-white/60">
-					En attente des autres joueurs...
-				</p>
-			</div>
-
-			<div class="flex items-center gap-2">
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60"></div>
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.2s"></div>
-				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.4s"></div>
-			</div>
 		{:else if phase === 'waiting'}
 			<div class="flex flex-col items-center gap-4">
-				<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
-					✓
-				</div>
-				<h2 class="text-2xl font-bold text-white">Réponse envoyée !</h2>
-				<p class="text-center text-white/80">
+				{#if isCorrect === true}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
+						✓
+					</div>
+					<h2 class="text-2xl font-bold text-white">Bonne réponse !</h2>
+					<p class="text-center text-white/80">
+						Votre bluff a été envoyé.
+					</p>
+				{:else if isCorrect === false}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-4xl shadow-lg">
+						✗
+					</div>
+					<h2 class="text-2xl font-bold text-white">Mauvaise réponse !</h2>
+					<p class="text-center text-white/80">
+						Votre réponse a été envoyée pour la phase de vote.
+					</p>
+				{:else}
+					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-blue-500 text-4xl shadow-lg">
+						⏳
+					</div>
+					<h2 class="text-2xl font-bold text-white">Réponse envoyée !</h2>
+				{/if}
+				
+				<p class="text-center text-white/80 mt-2">
 					En attente des autres joueurs...
 				</p>
 				<p class="text-center text-sm text-white/60">
@@ -496,109 +469,9 @@
 				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.2s"></div>
 				<div class="h-3 w-3 animate-pulse rounded-full bg-white/60" style="animation-delay: 0.4s"></div>
 			</div>
-		{:else if phase === 'voting'}
-			<h2 class="text-xl font-bold text-white mb-4">Trouvez la bonne réponse !</h2>
-			
-			<div class="grid grid-cols-1 gap-3 w-full sm:grid-cols-2">
-				{#each voteOptions as option}
-					{@const isMyBluff = option.authorId === playerId}
-					<button
-						class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all
-						{selectedVoteId === option.id 
-							? 'bg-white text-primary ring-4 ring-white/50 scale-[1.02]' 
-							: 'bg-white/20 text-white hover:bg-white/30'}
-						{isMyBluff ? 'opacity-50 cursor-not-allowed border-2 border-dashed border-white/50' : ''}"
-						onclick={() => handleVote(option.id)}
-						disabled={!!selectedVoteId || isMyBluff || isLoading}
-					>
-						<p class="font-medium text-lg">{option.text}</p>
-						{#if isMyBluff}
-							<span class="text-xs uppercase mt-2 font-bold tracking-wider">(Votre bluff)</span>
-						{/if}
-					</button>
-				{/each}
-			</div>
-			
-			{#if selectedVoteId}
-				<p class="text-white/80 animate-pulse mt-4">En attente des autres joueurs...</p>
-			{/if}
-
-		{:else if phase === 'revealing'}
-			<h2 class="text-xl font-bold text-white mb-4">Résultats</h2>
-			
-			<div class="grid grid-cols-1 gap-4 w-full">
-					{#each voteOptions as option}
-						{@const author = players.find((p: any) => p.id === option.authorId)}
-					<div
-						class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all border-2
-						{option.isCorrect 
-							? 'bg-green-500/90 border-green-300 text-white scale-[1.02] shadow-[0_0_20px_rgba(34,197,94,0.5)]' 
-							: option.votes.length > 0 
-								? 'bg-red-500/80 border-red-300 text-white' 
-								: 'bg-white/10 border-transparent text-white/60'}"
-					>
-						<p class="font-bold text-lg">{option.text}</p>
-						
-						{#if option.isCorrect}
-							<div class="absolute -top-3 -right-3 bg-green-400 text-white rounded-full p-1 shadow-md">
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-								</svg>
-							</div>
-						{/if}
-
-						<!-- Avatars des votants -->
-						{#if option.votes.length > 0}
-							<div class="absolute -top-4 left-1/2 transform -translate-x-1/2 flex -space-x-2">
-								{#each option.votes as voterId}
-									{@const voter = players.find((p: any) => p.id === voterId)}
-									{#if voter}
-										<div class="h-10 w-10 rounded-full bg-white flex items-center justify-center text-xl shadow-md border-2 border-white ring-1 ring-black/10" title={voter.name}>
-											{voter.avatar}
-										</div>
-									{/if}
-								{/each}
-							</div>
-						{/if}
-						
-						<!-- Auteur du bluff -->
-						{#if !option.isCorrect && author}
-							<div class="mt-2 text-xs flex items-center gap-1 bg-black/20 px-2 py-1 rounded-full">
-								<span>Bluff de</span>
-								<span class="font-bold">{author.name}</span>
-							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
-
-			<div class="w-full mt-6 bg-black/20 rounded-xl p-4">
-				<h3 class="text-white font-bold mb-3 text-center">Score du round</h3>
-				<div class="flex justify-around items-end h-24 gap-2">
-					{#each players as player: any}
-						<div class="flex flex-col items-center gap-1 group">
-							<div class="text-white font-bold text-sm bg-primary px-2 py-0.5 rounded-full mb-1 opacity-0 transition-all group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0">
-								+{player.roundScore}
-							</div>
-							<div class="relative">
-								<div class="h-12 w-12 rounded-full bg-white flex items-center justify-center text-2xl shadow-lg border-4 {player.id === playerId ? 'border-yellow-400' : 'border-transparent'}">
-									{player.avatar}
-								</div>
-								<div class="absolute -bottom-2 -right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded-full font-mono">
-									{player.score + player.roundScore}
-								</div>
-							</div>
-							<span class="text-white text-xs font-medium truncate max-w-[60px]">{player.name}</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-			
-			<div class="w-full mt-4">
-				<Button variant="primary" size="lg" onclick={() => alert("Prochain round !")}>
-					Round Suivant
-				</Button>
-			</div>
+		{:else if phase === 'voting' || phase === 'revealing'}
+			<!-- Utiliser le composant Vote pour gérer la phase de vote -->
+			<Vote {room} {question} {playerId} />
 		{/if}
 	</div>
 </Card>
