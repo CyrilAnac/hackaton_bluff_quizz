@@ -25,8 +25,12 @@
 
 			const data = await res.json();
 			if (data.success) {
+				// Stocker le playerId dans localStorage (en string pour être cohérent)
+				if (data.player?.id && typeof window !== 'undefined') {
+					localStorage.setItem(`playerId_${gameSettings.roomCode.toUpperCase()}`, String(data.player.id));
+				}
 				// Redirection vers la salle de jeu
-				goto(`/room/${gameSettings.roomCode.toUpperCase()}`);
+				goto(`/lobby/${gameSettings.roomCode.toUpperCase()}`);
 			} else {
 				alert(data.error || "Erreur lors de l'accès à la salle");
 			}

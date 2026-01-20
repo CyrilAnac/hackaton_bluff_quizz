@@ -1,36 +1,162 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
+	import { supabase } from '$lib/supabaseClient';
 	import Button from '../../../components/Button.svelte';
 	import Card from '../../../components/Card.svelte';
 	import Input from '../../../components/Input.svelte';
 	import Timer from '../../../components/Timer.svelte';
+	import type { PageData } from './$types';
 
-	// Mock data - will be replaced with real data later
-	const question = "Donnez la définition d'une herbe embroisée";
-	const correctAnswer = "plante herbacée dont le pollen est très allergisant";
-	const playerAvatar = '😀';
+	interface Props {
+		data: PageData;
+	}
 
+	let { data }: Props = $props();
+
+	// Données réactives
+	let room = $derived(data.room);
+	let question = $derived(data.question);
+	let currentPlayer = $derived(data.currentPlayer);
+	let playerResponse = $derived(data.playerResponse);
+	let playerVote = $derived(data.playerVote);
+	let allResponses = $derived(data.allResponses || []);
+	let votes = $derived(data.votes || []);
+
+	// États locaux
 	let answer = $state('');
 	let fakeAnswer = $state('');
 	let phase = $state<'answering' | 'correct' | 'wrong' | 'waiting' | 'voting' | 'revealing'>('answering');
-	let points = $state(0);
-	
-	// Mock data for voting phase
-	const players = [
-		{ id: 'p1', name: 'Moi', avatar: '😀', score: 10, roundScore: 0 },
-		{ id: 'p2', name: 'Alice', avatar: '🦊', score: 15, roundScore: 0 },
-		{ id: 'p3', name: 'Bob', avatar: '🤖', score: 8, roundScore: 0 },
-		{ id: 'p4', name: 'Charlie', avatar: '🦁', score: 12, roundScore: 0 }
-	];
-
-	let voteOptions = $state([
-		{ id: 'v1', text: "plante herbacée dont le pollen est très allergisant", authorId: null, isCorrect: true, votes: [] as string[] }, // Vraie réponse
-		{ id: 'v2', text: "Une technique de broderie médiévale utilisant du fil d'or", authorId: 'p2', isCorrect: false, votes: [] as string[] },
-		{ id: 'v3', text: "Un plat traditionnel du sud-ouest à base de canard", authorId: 'p3', isCorrect: false, votes: [] as string[] },
-		{ id: 'v4', text: "Une maladie des arbres fruitiers causée par un champignon", authorId: 'p4', isCorrect: false, votes: [] as string[] },
-		{ id: 'v5', text: fakeAnswer || "Une danse folklorique bretonne oubliée", authorId: 'p1', isCorrect: false, votes: [] as string[] } // Ma réponse (si j'ai bluffé)
-	]);
-	
+	let isLoading = $state(false);
+	let error = $state<string | null>(null);
+	let voteOptions = $state<any[]>([]);
 	let selectedVoteId = $state<string | null>(null);
+
+	// Récupérer le playerId depuis localStorage ou les données de la page
+	let playerId = $derived.by(() => {
+		if (typeof window !== 'undefined') {
+			const storedId = localStorage.getItem(`playerId_${room.code}`);
+			if (storedId) return storedId;
+		}
+		return currentPlayer?.id || null;
+	});
+
+	// Formater les joueurs depuis la room
+	const players = $derived(room.players?.map((p: any) => ({
+		id: p.id,
+		name: p.name,
+		avatar: p.icon_id,
+		score: 0, // TODO: Récupérer depuis la base de données
+		roundScore: 0
+	})) || []);
+
+	const playerAvatar = $derived(currentPlayer?.icon_id || '😀');
+
+	let channel: any;
+
+	onMount(() => {
+		// Déterminer la phase initiale
+		if (playerResponse) {
+			// Le joueur a déjà répondu
+			if (playerResponse.is_right) {
+				phase = 'waiting';
+			} else {
+				// C'est un bluff, vérifier si on est en phase de vote
+				checkVotingPhase();
+			}
+		} else {
+			phase = 'answering';
+		}
+
+		// S'abonner aux changements de réponses et votes
+		if (question?.id) {
+			channel = supabase
+				.channel(`question:${question.id}`)
+				.on(
+					'postgres_changes',
+					{
+						event: '*',
+						schema: 'public',
+						table: 'responses',
+						filter: `question_id=eq.${question.id}`
+					},
+					() => {
+						invalidateAll();
+					}
+				)
+				.on(
+					'postgres_changes',
+					{
+						event: '*',
+						schema: 'public',
+						table: 'votes',
+						filter: `response_id=in.(${allResponses.map(r => r.id).join(',')})`
+					},
+					() => {
+						invalidateAll();
+					}
+				)
+				.subscribe();
+		}
+	});
+
+	onDestroy(() => {
+		if (channel) {
+			supabase.removeChannel(channel);
+		}
+	});
+
+	// Fonction pour vérifier si on doit passer en phase de vote
+	async function checkVotingPhase() {
+		// Vérifier si tous les joueurs ont répondu
+		const totalPlayers = players.length;
+		const totalResponses = allResponses.length;
+
+		if (totalResponses >= totalPlayers) {
+			// Tous les joueurs ont répondu, passer à la phase de vote
+			await loadVoteOptions();
+			phase = 'voting';
+		} else {
+			phase = 'waiting';
+		}
+	}
+
+	// Charger les options de vote
+	async function loadVoteOptions() {
+		if (!question?.id) return;
+
+		// Utiliser les réponses déjà chargées depuis la page
+		if (allResponses && allResponses.length > 0) {
+			// Formater les options de vote
+			voteOptions = allResponses.map((r: any) => ({
+				id: r.id,
+				text: r.content_id,
+				authorId: r.player_id,
+				isCorrect: r.is_right,
+				votes: [] as string[]
+			}));
+
+			// Charger les votes existants
+			const responseIds = voteOptions.map((v: any) => v.id);
+			const { data: existingVotes } = await supabase
+				.from('votes')
+				.select('player_id, response_id')
+				.in('response_id', responseIds);
+
+			// Assigner les votes aux options
+			if (existingVotes) {
+				existingVotes.forEach((vote: any) => {
+					const option = voteOptions.find((v: any) => v.id === vote.response_id);
+					if (option) {
+						option.votes.push(vote.player_id);
+					}
+				});
+			}
+
+			// Mélanger les options
+			voteOptions = shuffleArray(voteOptions);
+		}
+	}
 
 	function shuffleArray<T>(array: T[]): T[] {
 		const newArray = [...array];
@@ -41,133 +167,173 @@
 		return newArray;
 	}
 
-	function checkAnswer() {
-		// Simplified check - in real app would be more sophisticated (AI-based)
-		const normalizedAnswer = answer.toLowerCase().trim();
-		const normalizedCorrect = correctAnswer.toLowerCase().trim();
+	async function checkAnswer() {
+		if (!answer.trim() || !question?.id || !playerId) return;
 
-		// Check if answer contains key words
-		const isCorrect =
-			normalizedAnswer.includes('pollen') ||
-			normalizedAnswer.includes('allerg') ||
-			normalizedAnswer.includes('plante');
+		isLoading = true;
+		error = null;
 
-		if (isCorrect) {
-			points++;
-			phase = 'correct';
-		} else {
-			phase = 'wrong';
-			// In real app: redirect to voting page after delay
-			setTimeout(() => {
-				if (!fakeAnswer) fakeAnswer = "Je n'ai pas eu d'idée..."; // Fallback
-				phase = 'waiting';
-				setTimeout(startVotingPhase, 3000);
-			}, 2000);
-		}
-	}
+		try {
+			// Vérifier la réponse avec l'API
+			const verifyRes = await fetch('/api/verify-answer', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					questionId: question.id,
+					answer: answer.trim()
+				})
+			});
 
-	function submitFakeAnswer() {
-		// TODO: Submit fake answer to server
-		console.log('Fake answer submitted:', fakeAnswer);
-		phase = 'waiting';
-		
-		// Pour la démo, on passe au vote après 3 secondes d'attente
-		setTimeout(() => {
-			startVotingPhase();
-		}, 3000);
-	}
+			const verifyData = await verifyRes.json();
 
-	function startVotingPhase() {
-		// Mélanger les options sauf si déjà fait
-		// En prod, ça viendrait du serveur déjà mélangé
-		// Ici on s'assure juste que ma fausse réponse est à jour
-		if (fakeAnswer) {
-			const myOptionIndex = voteOptions.findIndex(v => v.authorId === 'p1');
-			if (myOptionIndex !== -1) {
-				voteOptions[myOptionIndex].text = fakeAnswer;
+			if (!verifyData.success) {
+				throw new Error(verifyData.error || 'Erreur lors de la vérification');
 			}
+
+			if (verifyData.isValid) {
+				// Bonne réponse !
+				phase = 'correct';
+			} else {
+				// Mauvaise réponse, soumettre comme bluff
+				await submitBluff(answer.trim());
+			}
+		} catch (err: any) {
+			console.error('Erreur lors de la vérification:', err);
+			error = err.message || 'Erreur lors de la vérification de la réponse';
+		} finally {
+			isLoading = false;
 		}
-		voteOptions = shuffleArray(voteOptions);
-		phase = 'voting';
 	}
 
-	function handleVote(optionId: string) {
-		if (selectedVoteId) return; // Déjà voté
-		
-		// On ne peut pas voter pour sa propre réponse (sauf si on est admin/debug, mais règle générale non)
-		const option = voteOptions.find(v => v.id === optionId);
-		if (option?.authorId === 'p1') {
+	async function submitBluff(bluffText: string) {
+		if (!question?.id || !playerId) return;
+
+		try {
+			const res = await fetch('/api/game/respond', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					playerId,
+					questionId: question.id,
+					content: bluffText
+				})
+			});
+
+			const data = await res.json();
+
+			if (!data.success) {
+				throw new Error(data.error || 'Erreur lors de la soumission');
+			}
+
+			phase = 'wrong';
+			setTimeout(async () => {
+				await checkVotingPhase();
+			}, 2000);
+		} catch (err: any) {
+			console.error('Erreur lors de la soumission du bluff:', err);
+			error = err.message || 'Erreur lors de la soumission';
+		}
+	}
+
+	async function submitFakeAnswer() {
+		if (!fakeAnswer.trim() || !question?.id || !playerId) return;
+
+		isLoading = true;
+		error = null;
+
+		try {
+			// Soumettre la fausse réponse comme bluff
+			await submitBluff(fakeAnswer.trim());
+			phase = 'waiting';
+			
+			// Vérifier périodiquement si on peut passer au vote
+			const checkInterval = setInterval(async () => {
+				await checkVotingPhase();
+				if (phase === 'voting') {
+					clearInterval(checkInterval);
+				}
+			}, 2000);
+
+			// Arrêter après 30 secondes max
+			setTimeout(() => clearInterval(checkInterval), 30000);
+		} catch (err: any) {
+			console.error('Erreur lors de la soumission:', err);
+			error = err.message || 'Erreur lors de la soumission';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	async function handleVote(responseId: string) {
+		if (selectedVoteId || !playerId) return;
+
+		// Vérifier qu'on ne vote pas pour sa propre réponse
+		const option = voteOptions.find((v: any) => v.id === responseId);
+		if (option?.authorId === playerId) {
 			alert("Vous ne pouvez pas voter pour votre propre réponse !");
 			return;
 		}
 
-		selectedVoteId = optionId;
-		
-		// Simuler l'attente des autres
-		setTimeout(() => {
-			revealResults();
-		}, 2000);
+		isLoading = true;
+		error = null;
+
+		try {
+			const res = await fetch('/api/game/vote', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					playerId,
+					responseId
+				})
+			});
+
+			const data = await res.json();
+
+			if (!data.success) {
+				throw new Error(data.error || 'Erreur lors du vote');
+			}
+
+			selectedVoteId = responseId;
+			
+			// Attendre que tous les joueurs aient voté avant de révéler
+			setTimeout(async () => {
+				await revealResults();
+			}, 2000);
+		} catch (err: any) {
+			console.error('Erreur lors du vote:', err);
+			error = err.message || 'Erreur lors du vote';
+		} finally {
+			isLoading = false;
+		}
 	}
 
-	function revealResults() {
+	async function revealResults() {
+		// Recharger les votes pour avoir les résultats complets
+		await loadVoteOptions();
 		phase = 'revealing';
-		
-		// Simuler les votes des autres (random)
-		voteOptions = voteOptions.map(opt => {
-			const newVotes = [...opt.votes];
-			// Simuler quelques votes aléatoires des bots
-			players.slice(1).forEach(p => {
-				if (Math.random() > 0.5 && !opt.votes.includes(p.id)) {
-					// Logic très simplifiée, un bot vote pour une option au hasard en réalité
-				}
-			});
-			return opt;
-		});
-		
-		// Assigner des votes aléatoires pour la démo
-		const availablePlayers = players.slice(1); // Bots
-		availablePlayers.forEach(p => {
-			const randomOption = voteOptions[Math.floor(Math.random() * voteOptions.length)];
-			// Un joueur ne vote pas pour sa propre réponse
-			if (randomOption.authorId !== p.id) {
-				randomOption.votes.push(p.id);
-			} else {
-				// Il vote pour la vraie réponse par défaut s'il tombe sur la sienne
-				const correct = voteOptions.find(v => v.isCorrect);
-				correct?.votes.push(p.id);
-			}
-		});
-
-		// Ajouter mon vote
-		if (selectedVoteId) {
-			const myVoteOption = voteOptions.find(v => v.id === selectedVoteId);
-			myVoteOption?.votes.push('p1');
-		}
-
-		// Calculer les scores du round (Simplifié)
-		// +X points pour avoir trouvé la bonne réponse
-		// +Y points pour chaque joueur piégé par mon bluff
-		
-		// Si j'ai trouvé la bonne réponse
-		const myVote = voteOptions.find(v => v.id === selectedVoteId);
-		if (myVote?.isCorrect) {
-			players[0].roundScore += 100;
-		}
-
-		// Si des gens ont voté pour mon bluff
-		const myBluff = voteOptions.find(v => v.authorId === 'p1');
-		if (myBluff) {
-			players[0].roundScore += myBluff.votes.length * 50;
-		}
 	}
 
 	function handleTimeUp() {
 		if (phase === 'answering' && answer.trim()) {
 			checkAnswer();
 		} else if (phase === 'answering') {
-			phase = 'wrong';
+			// Soumettre une réponse vide comme bluff
+			if (answer.trim()) {
+				submitBluff(answer.trim());
+			}
 		}
 	}
+
+	// Vérifier la phase de vote au chargement si nécessaire
+	$effect(() => {
+		if (playerResponse && !playerResponse.is_right && phase === 'waiting') {
+			checkVotingPhase();
+		}
+		if (playerVote && phase !== 'revealing') {
+			selectedVoteId = playerVote.response_id;
+			revealResults();
+		}
+	});
 </script>
 
 <svelte:head>
@@ -183,24 +349,38 @@
 				>
 					{playerAvatar}
 				</div>
-				<Timer seconds={30} onComplete={handleTimeUp} />
+				{#if phase === 'answering'}
+					<Timer seconds={30} onComplete={handleTimeUp} />
+				{/if}
 			</div>
+
+			{#if error}
+				<div class="w-full rounded-lg bg-red-500/20 p-3 text-center text-sm text-red-300">
+					{error}
+				</div>
+			{/if}
 
 			{#if phase === 'answering'}
 				<h1 class="text-center text-xl font-bold text-white sm:text-2xl">
-					{question}
+					{question?.content || 'Chargement...'}
 				</h1>
 
 				<div class="w-full">
 					<Input
 						placeholder="Écrivez votre réponse..."
 						bind:value={answer}
+						disabled={isLoading}
 					/>
 				</div>
 
 				<div class="w-full">
-					<Button variant="primary" size="lg" onclick={checkAnswer} disabled={!answer.trim()}>
-						Valider
+					<Button 
+						variant="primary" 
+						size="lg" 
+						onclick={checkAnswer} 
+						disabled={!answer.trim() || isLoading}
+					>
+						{isLoading ? 'Vérification...' : 'Valider'}
 					</Button>
 				</div>
 			{:else if phase === 'correct'}
@@ -210,7 +390,7 @@
 					</div>
 					<h2 class="text-2xl font-bold text-white">Bonne réponse !</h2>
 					<p class="text-center text-white/80">
-						+1 point ! Maintenant, écrivez une fausse réponse crédible pour piéger les autres joueurs.
+						Maintenant, écrivez une fausse réponse crédible pour piéger les autres joueurs.
 					</p>
 				</div>
 
@@ -219,12 +399,18 @@
 						label="Votre fausse réponse"
 						placeholder="Inventez une réponse crédible..."
 						bind:value={fakeAnswer}
+						disabled={isLoading}
 					/>
 				</div>
 
 				<div class="w-full">
-					<Button variant="primary" size="lg" onclick={submitFakeAnswer} disabled={!fakeAnswer.trim()}>
-						Envoyer
+					<Button 
+						variant="primary" 
+						size="lg" 
+						onclick={submitFakeAnswer} 
+						disabled={!fakeAnswer.trim() || isLoading}
+					>
+						{isLoading ? 'Envoi...' : 'Envoyer'}
 					</Button>
 				</div>
 			{:else if phase === 'wrong'}
@@ -251,12 +437,12 @@
 					<div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 text-4xl shadow-lg">
 						✓
 					</div>
-					<h2 class="text-2xl font-bold text-white">Fausse réponse envoyée !</h2>
+					<h2 class="text-2xl font-bold text-white">Réponse envoyée !</h2>
 					<p class="text-center text-white/80">
-						Votre piège est en place. Voyons combien de joueurs vont tomber dedans...
+						En attente des autres joueurs...
 					</p>
 					<p class="text-center text-sm text-white/60">
-						En attente des autres joueurs...
+						{allResponses.length} / {players.length} joueurs ont répondu
 					</p>
 				</div>
 
@@ -270,17 +456,18 @@
 				
 				<div class="grid grid-cols-1 gap-3 w-full sm:grid-cols-2">
 					{#each voteOptions as option}
+						{@const isMyBluff = option.authorId === playerId}
 						<button
 							class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all
 							{selectedVoteId === option.id 
 								? 'bg-white text-primary ring-4 ring-white/50 scale-[1.02]' 
 								: 'bg-white/20 text-white hover:bg-white/30'}
-							{option.authorId === 'p1' ? 'opacity-50 cursor-not-allowed border-2 border-dashed border-white/50' : ''}"
+							{isMyBluff ? 'opacity-50 cursor-not-allowed border-2 border-dashed border-white/50' : ''}"
 							onclick={() => handleVote(option.id)}
-							disabled={!!selectedVoteId || option.authorId === 'p1'}
+							disabled={!!selectedVoteId || isMyBluff || isLoading}
 						>
 							<p class="font-medium text-lg">{option.text}</p>
-							{#if option.authorId === 'p1'}
+							{#if isMyBluff}
 								<span class="text-xs uppercase mt-2 font-bold tracking-wider">(Votre bluff)</span>
 							{/if}
 						</button>
@@ -296,6 +483,7 @@
 				
 				<div class="grid grid-cols-1 gap-4 w-full">
 					{#each voteOptions as option}
+						{@const author = players.find(p => p.id === option.authorId)}
 						<div
 							class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all border-2
 							{option.isCorrect 
@@ -329,14 +517,11 @@
 							{/if}
 							
 							<!-- Auteur du bluff -->
-							{#if !option.isCorrect && option.authorId}
-								{@const author = players.find(p => p.id === option.authorId)}
-								{#if author}
-									<div class="mt-2 text-xs flex items-center gap-1 bg-black/20 px-2 py-1 rounded-full">
-										<span>Bluff de</span>
-										<span class="font-bold">{author.name}</span>
-									</div>
-								{/if}
+							{#if !option.isCorrect && author}
+								<div class="mt-2 text-xs flex items-center gap-1 bg-black/20 px-2 py-1 rounded-full">
+									<span>Bluff de</span>
+									<span class="font-bold">{author.name}</span>
+								</div>
 							{/if}
 						</div>
 					{/each}
@@ -351,7 +536,7 @@
 									+{player.roundScore}
 								</div>
 								<div class="relative">
-									<div class="h-12 w-12 rounded-full bg-white flex items-center justify-center text-2xl shadow-lg border-4 {player.id === 'p1' ? 'border-yellow-400' : 'border-transparent'}">
+									<div class="h-12 w-12 rounded-full bg-white flex items-center justify-center text-2xl shadow-lg border-4 {player.id === playerId ? 'border-yellow-400' : 'border-transparent'}">
 										{player.avatar}
 									</div>
 									<div class="absolute -bottom-2 -right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded-full font-mono">

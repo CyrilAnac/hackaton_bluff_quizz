@@ -34,6 +34,10 @@
 			const data = await res.json();
 			
 			if (data.success) {
+				// Stocker le playerId dans localStorage
+				if (data.player?.id && typeof window !== 'undefined') {
+					localStorage.setItem(`playerId_${data.room.code}`, String(data.player.id));
+				}
 				goto(`/lobby/${data.room.code}`);
 			} else {
 				throw new Error(data.error || "Erreur lors de la création de la salle");
