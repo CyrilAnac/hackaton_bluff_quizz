@@ -25,26 +25,22 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json({ error: 'La partie a déjà commencé' }, { status: 400 });
 		}
 
-		// 2. Créer le joueur dans la table players
+		// 2. Insérer directement dans la table player_room
 		const { data: player, error: playerError } = await supabase
-			.from('players')
-			.insert([{ name: playerName, icon_id: iconId?.toString() || '1' }])
+			.from('player_room')
+			.insert([
+				{
+					room_id: room.id,
+					name: playerName,
+					icon_id: iconId?.toString() || '1'
+				}
+			])
 			.select()
 			.single();
 
 		if (playerError) {
-			console.error('Erreur creation player:', playerError);
-			return json({ error: 'Erreur lors de la création du joueur' }, { status: 500 });
-		}
-
-		// 3. Lier le joueur à la salle dans player_room
-		const { error: linkError } = await supabase
-			.from('player_room')
-			.insert([{ room_id: room.id, player_id: player.id }]);
-
-		if (linkError) {
-			console.error('Erreur link player_room:', linkError);
-			return json({ error: 'Erreur lors de la liaison joueur-salle' }, { status: 500 });
+			console.error('Erreur join player_room:', playerError);
+			return json({ error: 'Erreur lors de la connexion à la salle' }, { status: 500 });
 		}
 
 		return json({
@@ -53,7 +49,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			player
 		});
 	} catch (err) {
-		console.error('API Error:', err);
+		console.error('API Room Join Error:', err);
 		return json({ error: 'Erreur interne du serveur' }, { status: 500 });
 	}
 };

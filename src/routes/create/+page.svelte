@@ -1,10 +1,10 @@
 <script lang="ts">
+	import { gameSettings } from '$lib/gameSettings.svelte';
 	import Button from '../../components/Button.svelte';
 	import Card from '../../components/Card.svelte';
 	import NumberSelector from '../../components/NumberSelector.svelte';
 	import DifficultySelector from '../../components/DifficultySelector.svelte';
 
-	let questionCount = $state(5);
 	let difficulty = $state<'easy' | 'medium' | 'hard'>('medium');
 </script>
 
@@ -23,7 +23,7 @@
 
 			<div class="flex w-full flex-col items-center gap-2">
 				<p class="text-lg font-semibold text-white">Nombre de questions</p>
-				<NumberSelector min={1} max={15} bind:value={questionCount} />
+				<NumberSelector min={1} max={15} bind:value={gameSettings.rounds} />
 			</div>
 
 			<!--

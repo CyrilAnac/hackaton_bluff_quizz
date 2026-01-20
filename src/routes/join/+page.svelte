@@ -1,9 +1,8 @@
 <script lang="ts">
+	import { gameSettings } from '$lib/gameSettings.svelte';
 	import Button from '../../components/Button.svelte';
 	import Card from '../../components/Card.svelte';
 	import Input from '../../components/Input.svelte';
-
-	let roomCode = $state('');
 </script>
 
 <svelte:head>
@@ -23,13 +22,13 @@
 				<Input
 					label="Code de la room"
 					placeholder="Entrez le code (ex: AZ342)"
-					bind:value={roomCode}
+					bind:value={gameSettings.roomCode}
 				/>
 			</div>
 
 			<div class="mt-4 w-full max-w-sm">
 				<a href="/join/player" class="block">
-					<Button variant="primary" size="lg">Suivant</Button>
+					<Button variant="primary" size="lg" disabled={!gameSettings.roomCode}>Suivant</Button>
 				</a>
 			</div>
 		</div>
