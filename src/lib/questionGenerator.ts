@@ -3,29 +3,38 @@ import { supabase } from './supabaseClient';
 
 export interface Question {
 	content: string;
-	response: string;
 }
 
 /**
- * Génère des questions avec leurs réponses associées en utilisant Gemini
+ * Génère des questions difficiles pour un jeu de bluff où les joueurs doivent répondre avec une phrase
+ * Les questions sont conçues pour créer du doute et permettre des réponses ambiguës
  * @param count Le nombre de questions à générer
- * @returns Un tableau de questions avec leurs réponses
+ * @returns Un tableau de questions
  */
 export async function generateQuestions(count: number): Promise<Question[]> {
-	const prompt = `Génère ${count} questions de quiz amusantes et variées pour un jeu de bluff/quiz. 
-Chaque question doit être intéressante et avoir une réponse claire et factuelle.
+	const prompt = `Génère ${count} questions difficiles et ambiguës pour un jeu de bluff/quiz. 
+Ces questions doivent être suffisamment difficiles pour créer du doute chez les joueurs, et doivent pouvoir être répondues avec une phrase (pas juste un mot ou un nombre).
+
+Les questions doivent :
+- Être suffisamment difficiles pour que les joueurs ne soient pas sûrs de la réponse
+- Permettre des réponses formulées en phrase (pas juste "Paris" mais "La capitale de la France")
+- Créer de l'ambiguïté et du doute entre les joueurs
+- Être variées (histoire, géographie, sciences, culture générale, etc.)
+
+Exemples de bonnes questions :
+- "Quel événement historique a marqué le début de la Renaissance en Europe ?"
+- "Quelle est la particularité géographique qui distingue l'Islande de la plupart des autres îles ?"
+- "Quel scientifique est crédité de la découverte de la structure en double hélice de l'ADN ?"
 
 Format de réponse attendu (JSON valide) :
 {
   "questions": [
     {
-      "content": "Question ici",
-      "response": "Réponse ici"
+      "content": "Question ici"
     }
   ]
 }
 
-Les questions doivent être variées (histoire, géographie, sciences, culture générale, etc.) et adaptées à un public général.
 Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.`;
 
 	try {
@@ -44,8 +53,7 @@ Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire avant ou après.`;
 		}
 
 		return parsed.questions.map((q: any) => ({
-			content: q.content || q.question || '',
-			response: q.response || q.answer || ''
+			content: q.content || q.question || ''
 		}));
 	} catch (error) {
 		console.error('Erreur lors de la génération des questions:', error);
@@ -67,7 +75,6 @@ export async function insertQuestions(
 ): Promise<any[]> {
 	const questionsToInsert = questions.map((q) => ({
 		content: q.content,
-		response: q.response,
 		room_id: roomId,
 		round_number: roundNumber
 	}));
