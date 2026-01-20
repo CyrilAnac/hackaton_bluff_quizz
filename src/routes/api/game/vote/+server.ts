@@ -27,27 +27,34 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		// 3. Vérifier si le joueur a déjà voté pour cette question
-		// Pour cela, on regarde si un vote existe déjà pour une réponse liée à la même question
-		const { data: existingVote, error: voteCheckError } = await supabase
-			.from('votes')
-			.select('id')
-			.eq('player_id', playerId)
-			.innerJoin('responses', 'votes.response_id', 'responses.id')
-			.eq('responses.question_id', responseData.question_id)
-			.maybeSingle();
-
-		// Note: Si innerJoin ne marche pas direct avec le client JS de cette façon, 
-		// on peut faire une requête plus simple si on a stocké la question_id dans le vote 
-		// ou faire deux requêtes. Pour rester simple et efficace :
-		
-		/* 
-		Alternative si la relation complexe est compliquée en une fois :
-		const { data: playerVotes } = await supabase
+		// Récupérer tous les votes du joueur
+		const { data: playerVotes, error: voteCheckError } = await supabase
 			.from('votes')
 			.select('response_id')
 			.eq('player_id', playerId);
-		... vérifier si un des response_id appartient à la même question ...
-		*/
+
+		if (voteCheckError) {
+			console.error('Erreur vérification votes:', voteCheckError);
+		}
+
+		// Vérifier si un des votes du joueur est pour une réponse de la même question
+		if (playerVotes && playerVotes.length > 0) {
+			const responseIds = playerVotes.map((v: any) => v.response_id);
+			const { data: responsesForVotes } = await supabase
+				.from('responses')
+				.select('question_id')
+				.in('id', responseIds);
+
+			if (responsesForVotes) {
+				const hasVotedForThisQuestion = responsesForVotes.some(
+					(r: any) => r.question_id === responseData.question_id
+				);
+
+				if (hasVotedForThisQuestion) {
+					return json({ error: 'Tu as déjà voté pour cette question !' }, { status: 400 });
+				}
+			}
+		}
 
 		// 4. Insérer le vote
 		const { data: newVote, error: insertError } = await supabase
