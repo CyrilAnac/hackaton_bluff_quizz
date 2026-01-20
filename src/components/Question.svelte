@@ -71,7 +71,7 @@
 			// Récupérer toutes les réponses
 			const { data: responses, error: responsesError } = await supabase
 				.from('responses')
-				.select('id, content_id, player_id, is_right, question_id')
+				.select('id, content, player_id, is_right, question_id')
 				.eq('question_id', question.id);
 
 			if (responses) {
@@ -188,7 +188,7 @@
 		if (allResponses && allResponses.length > 0) {
 			voteOptions = allResponses.map((r: any) => ({
 				id: r.id,
-				text: r.content_id,
+				text: r.content,
 				authorId: r.player_id,
 				isCorrect: r.is_right,
 				votes: [] as string[]
@@ -229,61 +229,38 @@
 		error = null;
 
 		try {
-			const verifyRes = await fetch('/api/verify-answer', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					questionId: question.id,
-					answer: answer.trim()
-				})
-			});
-
-			const verifyData = await verifyRes.json();
-
-			if (!verifyData.success) {
-				throw new Error(verifyData.error || 'Erreur lors de la vérification');
-			}
-
-			if (verifyData.isValid) {
-				phase = 'correct';
-			} else {
-				await submitBluff(answer.trim());
-			}
-		} catch (err: any) {
-			console.error('Erreur lors de la vérification:', err);
-			error = err.message || 'Erreur lors de la vérification de la réponse';
-		} finally {
-			isLoading = false;
-		}
-	}
-
-	async function submitBluff(bluffText: string) {
-		if (!question?.id || !playerId) return;
-
-		try {
+			// Appeler directement /api/game/respond qui vérifie ET enregistre la réponse
 			const res = await fetch('/api/game/respond', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					playerId,
 					questionId: question.id,
-					content: bluffText
+					content: answer.trim()
 				})
 			});
 
 			const data = await res.json();
 
 			if (!data.success) {
-				throw new Error(data.error || 'Erreur lors de la soumission');
+				throw new Error(data.error || 'Erreur lors de la vérification');
 			}
 
-			phase = 'wrong';
-			setTimeout(async () => {
-				await checkVotingPhase();
-			}, 2000);
+			if (data.type === 'CORRECT') {
+				// Bonne réponse !
+				phase = 'correct';
+			} else if (data.type === 'BLUFF') {
+				// Mauvaise réponse, bluff enregistré
+				phase = 'wrong';
+				setTimeout(async () => {
+					await checkVotingPhase();
+				}, 2000);
+			}
 		} catch (err: any) {
-			console.error('Erreur lors de la soumission du bluff:', err);
-			error = err.message || 'Erreur lors de la soumission';
+			console.error('Erreur lors de la vérification:', err);
+			error = err.message || 'Erreur lors de la vérification de la réponse';
+		} finally {
+			isLoading = false;
 		}
 	}
 
@@ -294,8 +271,31 @@
 		error = null;
 
 		try {
-			await submitBluff(fakeAnswer.trim());
+			// Quand on est en phase 'correct', on a déjà trouvé la bonne réponse
+			// On crée directement un bluff sans vérification
+			const { data: bluffResponse, error: insertError } = await supabase
+				.from('responses')
+				.insert([{
+					question_id: question.id,
+					content: fakeAnswer.trim(),
+					player_id: playerId,
+					is_right: false
+				}])
+				.select()
+				.single();
+
+			if (insertError) {
+				// Si erreur (peut-être déjà une réponse), vérifier
+				if (insertError.code === '23505') { // Violation de contrainte unique
+					throw new Error('Vous avez déjà soumis une réponse pour cette question');
+				}
+				throw new Error('Erreur lors de l\'enregistrement de votre fausse réponse');
+			}
+
 			phase = 'waiting';
+			
+			// Recharger les données pour avoir la nouvelle réponse
+			await loadQuestionData();
 			
 			const checkInterval = setInterval(async () => {
 				await checkVotingPhase();
@@ -362,8 +362,6 @@
 	function handleTimeUp() {
 		if (phase === 'answering' && answer.trim()) {
 			checkAnswer();
-		} else if (phase === 'answering' && answer.trim()) {
-			submitBluff(answer.trim());
 		}
 	}
 
@@ -516,8 +514,8 @@
 			<h2 class="text-xl font-bold text-white mb-4">Résultats</h2>
 			
 			<div class="grid grid-cols-1 gap-4 w-full">
-				{#each voteOptions as option}
-					{@const author = players.find(p => p.id === option.authorId)}
+					{#each voteOptions as option}
+						{@const author = players.find((p: any) => p.id === option.authorId)}
 					<div
 						class="relative flex flex-col items-center justify-center rounded-xl p-4 text-center transition-all border-2
 						{option.isCorrect 

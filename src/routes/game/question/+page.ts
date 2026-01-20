@@ -37,7 +37,7 @@ export const load: PageLoad = async ({ params, url }) => {
 		// 3. Récupérer la bonne réponse pour cette question
 		const { data: correctResponse, error: correctError } = await supabase
 			.from('responses')
-			.select('content_id')
+			.select('content')
 			.eq('question_id', question.id)
 			.eq('is_right', true)
 			.single();
@@ -45,7 +45,7 @@ export const load: PageLoad = async ({ params, url }) => {
 		// 4. Récupérer toutes les réponses pour cette question (pour la phase de vote)
 		const { data: allResponses, error: responsesError } = await supabase
 			.from('responses')
-			.select('id, content_id, player_id, is_right, question_id')
+			.select('id, content, player_id, is_right, question_id')
 			.eq('question_id', question.id);
 
 		// Enrichir les réponses avec les infos des joueurs

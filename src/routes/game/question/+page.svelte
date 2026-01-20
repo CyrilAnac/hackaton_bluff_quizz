@@ -130,7 +130,7 @@
 			// Formater les options de vote
 			voteOptions = allResponses.map((r: any) => ({
 				id: r.id,
-				text: r.content_id,
+				text: r.content,
 				authorId: r.player_id,
 				isCorrect: r.is_right,
 				votes: [] as string[]
