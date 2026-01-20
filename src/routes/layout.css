@@ -1,3 +1,37 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+@theme {
+	--color-primary: #e85d04;
+	--color-primary-dark: #d45103;
+	--color-secondary: #f48c06;
+	--color-accent: #faa307;
+	--color-warm-dark: #370617;
+	--color-warm-medium: #6a040f;
+	--color-warm-light: #9d0208;
+
+	--font-heading: 'Fredoka', system-ui, sans-serif;
+	--font-body: 'Nunito', system-ui, sans-serif;
+}
+
+@layer base {
+	* {
+		box-sizing: border-box;
+	}
+
+	html,
+	body {
+		min-height: 100vh;
+		margin: 0;
+		padding: 0;
+		overflow-x: hidden;
+		overflow-y: hidden;
+	}
+
+	body {
+		font-family: var(--font-body);
+		background: linear-gradient(135deg, #d00000 0%, #dc2f02 25%, #e85d04 50%, #dc2f02 75%, #c1121f 100%);
+		background-attachment: fixed;
+	}
+}
