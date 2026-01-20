@@ -1,30 +1,62 @@
 <script lang="ts">
-	import { page } from '$app/stores';
-	import Button from '../../components/Button.svelte';
-	import Card from '../../components/Card.svelte';
-	import QRCode from '../../components/QRCode.svelte';
-	import PlayerList from '../../components/PlayerList.svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
+	import { supabase } from '$lib/supabaseClient';
+	import Button from '../../../components/Button.svelte';
+	import Card from '../../../components/Card.svelte';
+	import QRCode from '../../../components/QRCode.svelte';
+	import PlayerList from '../../../components/PlayerList.svelte';
+	import type { PageData } from './$types';
 
-	// Récupérer le code de la room depuis les query params ou localStorage
-	const roomCode = $derived(
-		$page.url.searchParams.get('code') ||
-			(typeof window !== 'undefined' ? localStorage.getItem('roomCode') : null) ||
-			'AZ342'
-	);
-	const joinUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/join?code=${roomCode}`;
+	interface Props {
+		data: PageData;
+	}
 
-	// Mock data - will be replaced with real data later
-	const players = [
-		{ name: 'Alice', avatar: '😀', isHost: true },
-		{ name: 'Bob', avatar: '😎' }
-	];
+	let { data }: Props = $props();
+
+	// Réactivité locale
+	let room = $derived(data.room);
+	let players = $derived(room.players ? room.players.map((p: any) => ({
+		name: p.name,
+		avatar: p.icon_id,
+		isHost: p.isHost
+	})) : []);
+	
+	const roomCode = $derived(room.code);
+	const joinUrl = $derived(`${typeof window !== 'undefined' ? window.location.origin : ''}/join?code=${roomCode}`);
+
+	let channel: any;
+
+	onMount(() => {
+		channel = supabase
+			.channel(`room:${room.id}`)
+			.on(
+				'postgres_changes',
+				{
+					event: '*',
+					schema: 'public',
+					table: 'player_room',
+					filter: `room_id=eq.${room.id}`
+				},
+				() => {
+					invalidateAll();
+				}
+			)
+			.subscribe();
+	});
+
+	onDestroy(() => {
+		if (channel) {
+			supabase.removeChannel(channel);
+		}
+	});
 
 	function copyCode() {
 		navigator.clipboard.writeText(roomCode);
 	}
 
 	function startGame() {
-		// TODO: Implement game start logic
+		// TODO: Implement game start logic (update room status to 'answering')
 		console.log('Starting game...');
 	}
 </script>

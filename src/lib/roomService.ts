@@ -106,3 +106,45 @@ export async function addPlayerToRoom(roomId: string, playerId: string): Promise
 		throw new Error(`Erreur lors de l'ajout du joueur à la room: ${error.message}`);
 	}
 }
+
+/**
+ * Récupère les informations d'une room par son code
+ * @param code Le code de la room
+ */
+export async function getRoomByCode(code: string) {
+	// 1. Récupérer la room
+	const { data: room, error: roomError } = await supabase
+		.from('room')
+		.select('*')
+		.eq('code', code)
+		.single();
+
+	if (roomError) {
+		throw new Error(`Erreur lors de la récupération de la room: ${roomError.message}`);
+	}
+
+	// 2. Récupérer les joueurs de la room directement depuis player_room
+	const { data: players, error: playersError } = await supabase
+		.from('player_room')
+		.select('*')
+		.eq('room_id', room.id);
+
+	if (playersError) {
+		console.error("Erreur lors de la récupération des joueurs:", playersError);
+		return { ...room, players: [] };
+	}
+
+	// 3. Formater les joueurs
+	const formattedPlayers = players.map((p: any) => ({
+		id: p.id,
+		name: p.name,
+		icon_id: p.icon_id,
+		// L'admin_id dans room correspond à un ID dans player_room
+		isHost: p.id === room.admin_id
+	}));
+
+	return {
+		...room,
+		players: formattedPlayers
+	};
+}
