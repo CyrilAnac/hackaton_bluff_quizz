@@ -116,7 +116,7 @@ export async function getRoomByCode(code: string) {
 	const { data: room, error: roomError } = await supabase
 		.from('room')
 		.select('*')
-		.eq('code', code)
+		.eq('code', code.toUpperCase())
 		.single();
 
 	if (roomError) {
@@ -126,7 +126,7 @@ export async function getRoomByCode(code: string) {
 	// 2. Récupérer les joueurs de la room directement depuis player_room
 	const { data: players, error: playersError } = await supabase
 		.from('player_room')
-		.select('*')
+		.select('id, name, icon_id')
 		.eq('room_id', room.id);
 
 	if (playersError) {
@@ -134,17 +134,11 @@ export async function getRoomByCode(code: string) {
 		return { ...room, players: [] };
 	}
 
-	// 3. Formater les joueurs
-	const formattedPlayers = players.map((p: any) => ({
-		id: p.id,
-		name: p.name,
-		icon_id: p.icon_id,
-		// L'admin_id dans room correspond à un ID dans player_room
-		isHost: p.id === room.admin_id
-	}));
-
 	return {
 		...room,
-		players: formattedPlayers
+		players: players.map((p: any) => ({
+			...p,
+			isHost: String(p.id) === String(room.admin_id)
+		}))
 	};
 }

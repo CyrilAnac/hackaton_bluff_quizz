@@ -26,7 +26,7 @@
 			const data = await res.json();
 			if (data.success) {
 				// Redirection vers la salle de jeu
-				goto(`/room/${gameSettings.roomCode.toUpperCase()}`);
+				goto(`/lobby/${gameSettings.roomCode.toUpperCase()}`);
 			} else {
 				alert(data.error || "Erreur lors de l'accès à la salle");
 			}
