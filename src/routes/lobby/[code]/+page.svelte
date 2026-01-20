@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { supabase } from '$lib/supabaseClient';
 	import { getRoomByCode } from '$lib/roomService';
 	import Button from '../../../components/Button.svelte';
@@ -17,6 +17,14 @@
 	let roomStatus = $state(data.room.status);
 	let isLoadingGame = $state(false);
 	let gameError = $state<string | null>(null);
+
+	// Synchroniser l'état local avec les données serveur si elles changent (ex: via invalidateAll)
+	$effect(() => {
+		if (data.room) {
+			players = data.room.players || [];
+			roomStatus = data.room.status;
+		}
+	});
 
 	// On crée un objet room réactif qui combine les données initiales et les états mis à jour
 	const room = $derived({
@@ -87,7 +95,10 @@
 				},
 				(payload) => {
 					console.log('Room update received:', payload);
+					// Mettre à jour l'état local immédiatement
 					roomStatus = payload.new.status;
+					// Et rafraîchir les données globales pour la cohérence
+					invalidateAll();
 				}
 			)
 			.subscribe((status) => {
@@ -130,6 +141,10 @@
 			const result = await res.json();
 			if (!result.success) {
 				gameError = result.error || "Erreur lors du lancement de la partie";
+			} else {
+				// Mettre à jour immédiatement pour l'administrateur sans attendre le retour realtime
+				roomStatus = 'PLAYING';
+				invalidateAll();
 			}
 		} catch (err) {
 			console.error(err);
