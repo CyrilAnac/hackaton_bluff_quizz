@@ -1,12 +1,12 @@
 <script lang="ts">
+	import { AVATARS } from '$lib/constants';
+
 	interface Props {
 		selected?: number;
 		onselect?: (index: number) => void;
 	}
 
-	let { selected = $bindable(1), onselect }: Props = $props();
-
-	const avatars = ['😀', '😎', '🤠', '🥳', '😺', '🐶'];
+	let { selected = $bindable(0), onselect }: Props = $props();
 
 	function selectAvatar(index: number) {
 		selected = index;
@@ -14,12 +14,12 @@
 	}
 
 	function prev() {
-		selected = selected > 0 ? selected - 1 : avatars.length - 1;
+		selected = selected > 0 ? selected - 1 : AVATARS.length - 1;
 		onselect?.(selected);
 	}
 
 	function next() {
-		selected = selected < avatars.length - 1 ? selected + 1 : 0;
+		selected = selected < AVATARS.length - 1 ? selected + 1 : 0;
 		onselect?.(selected);
 	}
 </script>
@@ -47,7 +47,7 @@
 		<div
 			class="flex h-20 w-20 items-center justify-center rounded-xl bg-white text-5xl shadow-lg"
 		>
-			{avatars[selected]}
+			{AVATARS[selected]}
 		</div>
 
 		<button
@@ -69,11 +69,11 @@
 		</button>
 	</div>
 
-	<div class="mt-2 grid grid-cols-3 gap-2">
-		{#each avatars as avatar, index}
+	<div class="mt-2 flex flex-wrap justify-center gap-2 sm:gap-3 max-w-[300px]">
+		{#each AVATARS as avatar, index}
 			<button
 				onclick={() => selectAvatar(index)}
-				class="flex h-12 w-12 cursor-pointer items-center justify-center rounded-lg text-2xl transition-all {selected === index
+				class="flex h-10 w-10 sm:h-12 sm:w-12 cursor-pointer items-center justify-center rounded-lg text-xl sm:text-2xl transition-all {selected === index
 					? 'bg-white shadow-lg ring-4 ring-accent'
 					: 'bg-white/70 hover:bg-white/90'}"
 			>

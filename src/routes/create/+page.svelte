@@ -35,7 +35,7 @@
 			<div class="mt-4 w-full max-w-sm">
 				<a href="/create/player" onclick={() => {
 					if (typeof window !== 'undefined') {
-						localStorage.setItem('questionCount', questionCount.toString());
+						localStorage.setItem('questionCount', gameSettings.rounds.toString());
 					}
 				}} class="block">
 					<Button variant="primary" size="lg">Suivant</Button>
