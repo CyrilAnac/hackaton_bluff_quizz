@@ -69,11 +69,11 @@
 		</button>
 	</div>
 
-	<div class="mt-2 grid grid-cols-5 gap-2">
+	<div class="mt-2 flex flex-wrap justify-center gap-2 sm:gap-3 max-w-[300px]">
 		{#each AVATARS as avatar, index}
 			<button
 				onclick={() => selectAvatar(index)}
-				class="flex h-12 w-12 cursor-pointer items-center justify-center rounded-lg text-2xl transition-all {selected === index
+				class="flex h-10 w-10 sm:h-12 sm:w-12 cursor-pointer items-center justify-center rounded-lg text-xl sm:text-2xl transition-all {selected === index
 					? 'bg-white shadow-lg ring-4 ring-accent'
 					: 'bg-white/70 hover:bg-white/90'}"
 			>
