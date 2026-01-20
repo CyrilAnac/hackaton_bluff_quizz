@@ -138,6 +138,19 @@
 				.on(
 					'postgres_changes',
 					{
+						event: 'INSERT',
+						schema: 'public',
+						table: 'question',
+						filter: `room_id=eq.${room.id}`
+					},
+					() => {
+						console.log("Nouvelle question détectée !");
+						loadQuestionData();
+					}
+				)
+				.on(
+					'postgres_changes',
+					{
 						event: '*',
 						schema: 'public',
 						table: 'responses',
@@ -181,7 +194,7 @@
 		}
 	}
 
-	// Charger les options de vote
+		// Charger les options de vote
 	async function loadVoteOptions() {
 		if (!question?.id) return;
 

@@ -72,11 +72,14 @@
 					table: 'room',
 					filter: `id=eq.${room.id}`
 				},
-				() => {
+				(payload) => {
+					console.log('Room update received:', payload);
 					invalidateAll();
 				}
 			)
-			.subscribe();
+			.subscribe((status) => {
+				console.log('Subscription status:', status);
+			});
 	});
 
 	onDestroy(() => {
@@ -117,9 +120,12 @@
 
 			if (!data.success) {
 				gameError = data.error || 'Erreur lors du lancement de la partie';
+			} else {
+				// Mettre à jour immédiatement pour l'administrateur sans attendre le retour realtime
+				invalidateAll();
 			}
 			// Pas besoin de redirection, le composant Question s'affichera automatiquement
-			// grâce à la réactivité de Supabase qui mettra à jour room.status
+			// grâce à la réactivité de Supabase qui mettra à jour room.status (pour les autres joueurs)
 		} catch (err) {
 			console.error('Erreur lors du lancement:', err);
 			gameError = 'Erreur réseau lors du lancement de la partie';
