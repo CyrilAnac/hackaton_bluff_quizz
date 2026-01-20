@@ -5,17 +5,12 @@
 	import Card from '../../../components/Card.svelte';
 	import Input from '../../../components/Input.svelte';
 	import AvatarSelector from '../../../components/AvatarSelector.svelte';
-	import { createPlayer, createRoom, addPlayerToRoom } from '$lib/roomService';
 
-	let playerName = $state('');
-	let selectedAvatar = $state(0);
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 
-	const avatars = ['😀', '😎', '🤠', '🥳', '😺', '🐶'];
-
 	async function createRoomAndGenerateQuestions() {
-		if (!playerName.trim()) {
+		if (!gameSettings.playerName.trim()) {
 			error = 'Veuillez entrer votre nom';
 			return;
 		}
@@ -24,50 +19,28 @@
 		error = null;
 
 		try {
-			// Récupérer le nombre de questions depuis localStorage
-			const questionCount = parseInt(
-				typeof window !== 'undefined' ? localStorage.getItem('questionCount') || '5' : '5'
-			);
-
-			// Créer le joueur
-			const playerId = await createPlayer(playerName.trim(), avatars[selectedAvatar]);
-
-			// Créer la room (le nombre de rounds = nombre de questions pour simplifier)
-			const room = await createRoom(playerId, questionCount);
-
-			// Ajouter le joueur à la room
-			await addPlayerToRoom(room.id, playerId);
-
-			// Générer les questions pour le round 1 via l'API
-			const response = await fetch('/api/generate-questions', {
+			// Appel unique transactionnel
+			const res = await fetch('/api/room/create', {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					count: questionCount,
-					roomId: room.id,
-					roundNumber: 1
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ 
+					playerName: gameSettings.playerName, 
+					iconId: gameSettings.iconId,
+					rounds: gameSettings.rounds
 				})
 			});
 
-			if (!response.ok) {
-				const errorData = await response.json();
-				throw new Error(errorData.error || 'Erreur lors de la génération des questions');
+			const data = await res.json();
+			
+			if (data.success) {
+				goto(`/room/${data.room.code}`);
+			} else {
+				throw new Error(data.error || "Erreur lors de la création de la salle");
 			}
-
-			// Stocker les informations de la room pour la page lobby
-			if (typeof window !== 'undefined') {
-				localStorage.setItem('roomId', room.id);
-				localStorage.setItem('roomCode', room.code);
-				localStorage.setItem('playerId', playerId);
-			}
-
-			// Rediriger vers le lobby
-			await goto(`/lobby?code=${room.code}`);
-		} catch (err) {
-			console.error('Erreur lors de la création de la room:', err);
-			error = err instanceof Error ? err.message : 'Une erreur est survenue';
+		} catch (err: any) {
+			console.error('Erreur lors du flux de création:', err);
+			error = err.message;
+		} finally {
 			isLoading = false;
 		}
 	}
@@ -106,7 +79,7 @@
 					variant="primary"
 					size="lg"
 					onclick={createRoomAndGenerateQuestions}
-					disabled={isLoading}
+					disabled={isLoading || !gameSettings.playerName.trim()}
 				>
 					{isLoading ? 'Création en cours...' : 'Créer la salle'}
 				</Button>
